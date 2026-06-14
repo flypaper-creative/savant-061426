@@ -1,0 +1,6 @@
+{
+  "name": "Asteroid Cockpit Shooter",
+  "description": "A first-person 3D space shooter where you pilot a starship through a dangerous asteroid field, managing weapons and shield systems.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
