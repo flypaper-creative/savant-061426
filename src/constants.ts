@@ -3,7 +3,7 @@ import { WeaponID, WeaponConfig } from './types';
 export const WEAPON_CONFIGS: Record<WeaponID, WeaponConfig> = {
   [WeaponID.PLASMA_LASER]: {
     id: WeaponID.PLASMA_LASER,
-    name: 'Plasma Laser',
+    name: 'PLASMA',
     description: 'High velocity dual plasma bolts. Reliable and low energy consumption.',
     damage: 20,
     fireRate: 200, // min cooldown in ms
@@ -14,7 +14,7 @@ export const WEAPON_CONFIGS: Record<WeaponID, WeaponConfig> = {
   },
   [WeaponID.PROTON_TORPEDO]: {
     id: WeaponID.PROTON_TORPEDO,
-    name: 'Proton Torpedo',
+    name: 'TORPEDO',
     description: 'Slow-moving thermonuclear payload that triggers high splash damage.',
     damage: 100,
     fireRate: 800,
@@ -25,7 +25,7 @@ export const WEAPON_CONFIGS: Record<WeaponID, WeaponConfig> = {
   },
   [WeaponID.ION_BEAM]: {
     id: WeaponID.ION_BEAM,
-    name: 'Ion Beam',
+    name: 'BEAM',
     description: 'Continuous ionized beam. Instant hit but drains ship reserves extremely quickly.',
     damage: 4, // damage per frame (very fast)
     fireRate: 40,
@@ -36,7 +36,7 @@ export const WEAPON_CONFIGS: Record<WeaponID, WeaponConfig> = {
   },
   [WeaponID.FLAK_CANNON]: {
     id: WeaponID.FLAK_CANNON,
-    name: 'Disruptor Flak',
+    name: 'FLAK',
     description: 'Fires massive fragmented kinetic clusters to clear smaller fast asteroids.',
     damage: 15, // per shard
     fireRate: 450,
@@ -64,7 +64,7 @@ export interface LevelConfig {
 export const LEVELS: LevelConfig[] = [
   {
     number: 1,
-    name: 'Orion belt Margin',
+    name: 'ORION',
     targetCount: 15,
     spawnInterval: 1400,
     asteroidSpeedMin: 1.8,
@@ -74,7 +74,7 @@ export const LEVELS: LevelConfig[] = [
   },
   {
     number: 2,
-    name: 'Helios Chasm Cluster',
+    name: 'HELIOS',
     targetCount: 22,
     spawnInterval: 1100,
     asteroidSpeedMin: 2.4,
@@ -84,7 +84,7 @@ export const LEVELS: LevelConfig[] = [
   },
   {
     number: 3,
-    name: 'Nebula-9 Core Dust',
+    name: 'NEBULA',
     targetCount: 30,
     spawnInterval: 900,
     asteroidSpeedMin: 3.0,
@@ -94,7 +94,7 @@ export const LEVELS: LevelConfig[] = [
   },
   {
     number: 4,
-    name: 'Omega Void Event Horizon',
+    name: 'OMEGA',
     targetCount: 45,
     spawnInterval: 750,
     asteroidSpeedMin: 3.8,
@@ -104,7 +104,7 @@ export const LEVELS: LevelConfig[] = [
   },
   {
     number: 5,
-    name: 'Hyperspace Overload Void',
+    name: 'HYPER',
     targetCount: 60,
     spawnInterval: 600,
     asteroidSpeedMin: 4.5,

@@ -1,6 +1,6 @@
 {
   "name": "Asteroid Cockpit Shooter",
-  "description": "A first-person 3D space shooter where you pilot a starship through a dangerous asteroid field, managing weapons and shield systems.",
+  "description": "A premium first-person 3D space flight simulator branded for SAVANT, featuring high-frequency digital audio, futuristic starships, and clean minimalist, single-word tactical operations.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

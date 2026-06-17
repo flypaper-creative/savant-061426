@@ -25,8 +25,24 @@ function createNoiseBuffer(ctx: AudioContext): AudioBuffer {
   return buffer;
 }
 
+let isMuted = typeof window !== 'undefined' ? localStorage.getItem('asteroid_game_muted') === 'true' : false;
+
 export const playSound = {
+  getMuted: () => isMuted,
+  setMuted: (val: boolean) => {
+    isMuted = val;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('asteroid_game_muted', String(val));
+    }
+    if (isMuted) {
+      playSound.stopEngine();
+    } else {
+      playSound.startEngine();
+    }
+  },
+
   laser: (type: WeaponID) => {
+    if (isMuted) return;
     try {
       const ctx = getAudioContext();
       const now = ctx.currentTime;
@@ -128,6 +144,7 @@ export const playSound = {
   },
 
   explosion: (isHeavy: boolean = false) => {
+    if (isMuted) return;
     try {
       const ctx = getAudioContext();
       const now = ctx.currentTime;
@@ -173,6 +190,7 @@ export const playSound = {
   },
 
   shieldHit: () => {
+    if (isMuted) return;
     try {
       const ctx = getAudioContext();
       const now = ctx.currentTime;
@@ -206,6 +224,7 @@ export const playSound = {
   },
 
   warp: () => {
+    if (isMuted) return;
     try {
       const ctx = getAudioContext();
       const now = ctx.currentTime;
@@ -239,6 +258,7 @@ export const playSound = {
   },
 
   upgrade: () => {
+    if (isMuted) return;
     try {
       const ctx = getAudioContext();
       const now = ctx.currentTime;
@@ -265,6 +285,7 @@ export const playSound = {
   },
 
   alarm: () => {
+    if (isMuted) return;
     try {
       const ctx = getAudioContext();
       const now = ctx.currentTime;
@@ -289,7 +310,49 @@ export const playSound = {
     }
   },
 
+  overdriveReady: () => {
+    if (isMuted) return;
+    try {
+      const ctx = getAudioContext();
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(600, now);
+      osc.frequency.exponentialRampToValueAtTime(1400, now + 0.45);
+      gain.gain.setValueAtTime(0.25, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.45);
+      osc.start(now);
+      osc.stop(now + 0.45);
+    } catch (e) {}
+  },
+
+  overdriveFire: () => {
+    if (isMuted) return;
+    try {
+      const ctx = getAudioContext();
+      const now = ctx.currentTime;
+      for (let i = 0; i < 4; i++) {
+        const timeOffset = i * 0.08;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(1200 - i * 150, now + timeOffset);
+        osc.frequency.exponentialRampToValueAtTime(150, now + timeOffset + 0.25);
+        gain.gain.setValueAtTime(0.25, now + timeOffset);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + timeOffset + 0.25);
+        osc.start(now + timeOffset);
+        osc.stop(now + timeOffset + 0.25);
+      }
+    } catch (e) {}
+  },
+
   startEngine: () => {
+    if (isMuted) return;
     try {
       const ctx = getAudioContext();
       const now = ctx.currentTime;
@@ -324,13 +387,12 @@ export const playSound = {
   },
 
   updateEnginePitch: (warpFactor: number) => {
+    if (isMuted) return;
     try {
       if (engineOscillator && engineGain) {
         const ctx = getAudioContext();
         const now = ctx.currentTime;
         // Map warp factor to pitch & volume
-        // normal speed: warpFactor = 1.0 (55Hz rumble)
-        // high warp speed: high factor (pitch ascends)
         engineOscillator.frequency.setTargetAtTime(55 * warpFactor, now, 0.2);
         engineGain.gain.setTargetAtTime(0.06 + Math.min(0.05, warpFactor * 0.01), now, 0.2);
       }
