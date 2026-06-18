@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { Asteroid, Projectile, ExplosionParticle, Star, WeaponID, PilotStats, GamePhase, AsteroidType, Pickup3D, PilotPerks, DifficultyLevel, SystemID, StarSystem, FloatingText, Shockwave } from '../types';
 import { WEAPON_CONFIGS, LEVELS, INITIAL_SHIELD, INITIAL_ENERGY } from '../constants';
 import { playSound } from '../utils/audio';
@@ -12,6 +15,12 @@ import { playSound } from '../utils/audio';
 export const EXTERNAL_BG_URL: string | null = '/assets/bkgs/ORION_NEBULA.png'; // e.g., '/bg.png' or '/video.mp4'
 export const EXTERNAL_BG_TYPE: 'image' | 'video' | 'procedural' = 'image';
 // ---------------------------------------------
+
+const _tempColor = new THREE.Color();
+const _tempVec3 = new THREE.Vector3();
+const _tempAstIds = new Set<string>();
+const _tempProjIds = new Set<string>();
+const _tempPickupIds = new Set<string>();
 
 interface AsteroidCanvasProps {
   activeWeapon: WeaponID;
@@ -30,9 +39,7 @@ interface AsteroidCanvasProps {
   stats: PilotStats;
   setStats: React.Dispatch<React.SetStateAction<PilotStats>>;
   isPaused: boolean;
-  screenShake: number;
-  setScreenShake: React.Dispatch<React.SetStateAction<number>>;
-  perks: PilotPerks;
+    perks: PilotPerks;
   setPerks: React.Dispatch<React.SetStateAction<PilotPerks>>;
   touchControlMode: 'TETHER' | 'JOYSTICK';
   setTouchControlMode: (m: 'TETHER' | 'JOYSTICK') => void;
@@ -622,7 +629,50 @@ function createMattePaintingTexture(systemId?: string): THREE.CanvasTexture {
   if (ctx) {
     ctx.clearRect(0, 0, 2048, 1024);
 
-    if (systemId === SystemID.ALPHA_CENTAURI) {
+    if (systemId === SystemID.GLIESE_WATERWORLD) {
+      // Deep Murky Ocean
+      const oceanGrad = ctx.createLinearGradient(0, 0, 0, 1024);
+      oceanGrad.addColorStop(0, '#001a1a'); // surface light
+      oceanGrad.addColorStop(0.3, '#000c14'); // mid depth
+      oceanGrad.addColorStop(1, '#000000'); // bottom depth
+      ctx.fillStyle = oceanGrad;
+      ctx.fillRect(0, 0, 2048, 1024);
+
+      // Shafts of light filtering down
+      ctx.globalCompositeOperation = 'screen';
+      for (let i = 0; i < 20; i++) {
+        ctx.beginPath();
+        const startX = Math.random() * 2048;
+        const width = 20 + Math.random() * 80;
+        const angle = (Math.random() - 0.5) * 0.5; // slight angle
+        
+        ctx.moveTo(startX, 0);
+        ctx.lineTo(startX + width, 0);
+        ctx.lineTo(startX + width + (1024 * angle), 1024);
+        ctx.lineTo(startX + (1024 * angle), 1024);
+        
+        const lightGrad = ctx.createLinearGradient(0, 0, 0, 1024);
+        lightGrad.addColorStop(0, `rgba(0, 255, 200, ${0.05 + Math.random() * 0.05})`);
+        lightGrad.addColorStop(1, 'rgba(0, 0, 50, 0)');
+        
+        ctx.fillStyle = lightGrad;
+        ctx.fill();
+      }
+      ctx.globalCompositeOperation = 'source-over';
+      
+      // Floating particulates
+      ctx.fillStyle = '#00ffcc';
+      for (let i = 0; i < 2000; i++) {
+        const sx = Math.random() * 2048;
+        const sy = Math.random() * 1024;
+        const sw = 1 + Math.random() * 2;
+        ctx.globalAlpha = Math.random() * 0.15;
+        ctx.beginPath();
+        ctx.arc(sx, sy, sw, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1.0;
+    } else if (systemId === SystemID.ALPHA_CENTAURI) {
       // Space backdrop (cold void)
       const spaceGrad = ctx.createLinearGradient(0, 0, 0, 1024);
       spaceGrad.addColorStop(0, '#000000');
@@ -863,7 +913,7 @@ function createMattePaintingTexture(systemId?: string): THREE.CanvasTexture {
   return tex;
 }
 
-export default function AsteroidCanvas({
+const AsteroidCanvas = function AsteroidCanvas({
   activeWeapon,
   shield,
   setShield,
@@ -880,9 +930,7 @@ export default function AsteroidCanvas({
   stats,
   setStats,
   isPaused,
-  screenShake,
-  setScreenShake,
-  perks,
+    perks,
   setPerks,
   touchControlMode,
   setTouchControlMode,
@@ -912,6 +960,7 @@ export default function AsteroidCanvas({
   // Model templates cache
   const cachedAsteroidModelRef = useRef<THREE.Object3D | null>(null);
   const cachedEnemyShipModelRef = useRef<THREE.Object3D | null>(null);
+  const cachedSubmarineModelRef = useRef<THREE.Group | null>(null);
   const cachedLogoModelRef = useRef<THREE.Object3D | null>(null);
   const modelsLoadedRef = useRef<boolean>(false);
 
@@ -949,6 +998,8 @@ export default function AsteroidCanvas({
 
   // Re-usable mesh pools to completely avoid GC allocations
   const asteroidMeshPoolRef = useRef<Map<AsteroidType, THREE.Object3D[]>>(new Map());
+  const projectileMeshPoolRef = useRef<Map<WeaponID, THREE.Object3D[]>>(new Map());
+  const pickupMeshPoolRef = useRef<Map<string, THREE.Object3D[]>>(new Map());
 
   // Canvas context dimension trackers
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
@@ -967,6 +1018,7 @@ export default function AsteroidCanvas({
 
   const mouseRef = useRef<{ x: number; y: number }>({ x: 400, y: 300 });
   const isShootingRef = useRef<boolean>(false);
+  const screenShakeRef = useRef<number>(0);
   const lastFiredTimeRef = useRef<number>(0);
   const animationFrameIdRef = useRef<number>(0);
 
@@ -983,6 +1035,7 @@ export default function AsteroidCanvas({
   const novaSequenceRef = useRef<number>(0);
   const lastSpawnTimeRef = useRef<number>(0);
   const levelAsteroidsDestroyedRef = useRef<number>(0);
+  const waveTriggersRef = useRef<Set<number>>(new Set());
 
   // Smooth ship rotation variables for parallax drift & roll
   const yawVelocityRef = useRef<number>(0);
@@ -1039,6 +1092,8 @@ export default function AsteroidCanvas({
         activeColor = 0xf97316; // Obsidian Lava Orange
       } else if (activeSystemId === SystemID.SIRIUS_PRIME) {
         activeColor = 0xec4899; // Vaporwave Cyber Pink
+      } else if (activeSystemId === SystemID.GLIESE_WATERWORLD) {
+        activeColor = 0x00ffaa; // Deep Sea Green
       }
       
       threeSceneRef.current.traverse((child) => {
@@ -1046,6 +1101,13 @@ export default function AsteroidCanvas({
           child.color.setHex(activeColor);
         }
       });
+      
+      // Update fog dynamically
+      if (activeSystemId === SystemID.GLIESE_WATERWORLD) {
+        threeSceneRef.current.fog = new THREE.FogExp2(0x001318, 0.0006); // Thicker murky teal mist
+      } else {
+        threeSceneRef.current.fog = new THREE.FogExp2(0x020205, 0.00030); // Default space vacuum
+      }
     }
   }, [activeSystemId]);
 
@@ -1167,7 +1229,82 @@ export default function AsteroidCanvas({
     const envTex = new THREE.CanvasTexture(envCanvas);
     envTex.colorSpace = THREE.SRGBColorSpace;
     envTex.mapping = THREE.EquirectangularReflectionMapping;
-    const envMap = pmremGenerator.fromEquirectangular(envTex).texture;
+
+    // Create a dedicated separate hyper-neon environment map for reflective surfaces (like the HUD logo and ships)
+    const neonCanvas = document.createElement('canvas');
+    neonCanvas.width = 512;
+    neonCanvas.height = 256;
+    const neonCtx = neonCanvas.getContext('2d')!;
+    
+    const fireParticles: any[] = [];
+    for(let i=0; i<120; i++) {
+       fireParticles.push({
+         x: Math.random() * 512,
+         y: 256 + Math.random() * 100,
+         r: Math.random() * 30 + 10,
+         speedX: (Math.random() - 0.5) * 4,
+         speedY: Math.random() * 5 + 3,
+         color: Math.random() > 0.5 ? '#ff8800' : '#ff2200',
+         life: Math.random()
+       });
+    }
+    
+    const neonTex = new THREE.CanvasTexture(neonCanvas);
+    neonTex.colorSpace = THREE.SRGBColorSpace;
+    
+    // Animate fire independently
+    
+    let fireAnimId: number;
+    const animateFire = () => {
+      fireAnimId = requestAnimationFrame(animateFire);
+      
+      // Clear top 1/3 to black
+      neonCtx.fillStyle = '#010101';
+      neonCtx.fillRect(0, 0, 512, 256 / 3);
+      
+      // Draw fire background for bottom 2/3
+      const fireBg = neonCtx.createLinearGradient(0, 256/3, 0, 256);
+      fireBg.addColorStop(0, '#010101');
+      fireBg.addColorStop(0.3, '#330000');
+      fireBg.addColorStop(0.7, '#cc3300');
+      fireBg.addColorStop(1, '#ffffff');
+      neonCtx.fillStyle = fireBg;
+      neonCtx.fillRect(0, 256/3, 512, 256 - 256/3);
+      
+      fireParticles.forEach(p => {
+        p.x += p.speedX;
+        p.y -= p.speedY;
+        p.life -= 0.02;
+        
+        if (p.y < 256/3 || p.life <= 0) {
+          p.y = 256 + Math.random() * 50;
+          p.x = Math.random() * 512;
+          p.life = 1.0;
+        }
+        
+        neonCtx.beginPath();
+        neonCtx.arc(p.x, p.y, p.r * p.life, 0, Math.PI * 2);
+        const grad = neonCtx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r * p.life);
+        grad.addColorStop(0, p.color);
+        grad.addColorStop(1, 'transparent');
+        neonCtx.fillStyle = grad;
+        neonCtx.fill();
+        
+        // Wrap around horizontally
+        if (p.x < 0) p.x += 512;
+        if (p.x > 512) p.x -= 512;
+      });
+      
+      neonTex.needsUpdate = true;
+    };
+    animateFire();
+    
+    threeRendererRef.current.userData = { fireAnimId };
+
+
+    neonTex.mapping = THREE.EquirectangularReflectionMapping;
+    
+    const envMap = pmremGenerator.fromEquirectangular(neonTex).texture;
     scene.environment = envMap;
     // We can also set background to envMap if we want
     // scene.background = envMap; 
@@ -1277,6 +1414,7 @@ export default function AsteroidCanvas({
     asteroidMeshPoolRef.current.set(AsteroidType.TIME_WARP, []);
     asteroidMeshPoolRef.current.set(AsteroidType.DEBRIS, []);
     asteroidMeshPoolRef.current.set(AsteroidType.ENEMY_SHIP, []);
+    asteroidMeshPoolRef.current.set(AsteroidType.ALIEN_SUBMARINE, []);
 
     // 1. Distant Background Matte Painting (HUGE Planet + Space)
     // Removed MattePainting background as requested
@@ -1482,6 +1620,30 @@ export default function AsteroidCanvas({
       (err) => console.warn('Failed to load ship.glb', err)
     );
 
+    // Procedural Submarine model
+    const subGroup = new THREE.Group();
+    const hullGeo = new THREE.CylinderGeometry(0.4, 0.4, 2.5, 16);
+    hullGeo.rotateZ(Math.PI / 2);
+    const hullMat = new THREE.MeshStandardMaterial({color: 0x112233, metalness: 0.8, roughness: 0.3});
+    const hull = new THREE.Mesh(hullGeo, hullMat);
+    subGroup.add(hull);
+    
+    const towerGeo = new THREE.BoxGeometry(0.6, 0.6, 0.4);
+    const towerMat = new THREE.MeshStandardMaterial({color: 0x223344, metalness: 0.7, roughness: 0.4});
+    const tower = new THREE.Mesh(towerGeo, towerMat);
+    tower.position.set(-0.3, 0.5, 0);
+    subGroup.add(tower);
+    
+    // Engine glow
+    const engineGeo = new THREE.CylinderGeometry(0.2, 0.3, 0.2, 16);
+    engineGeo.rotateZ(Math.PI / 2);
+    const engineMat = new THREE.MeshStandardMaterial({color: 0x00ffcc, emissive: 0x00ffcc, emissiveIntensity: 2});
+    const engine = new THREE.Mesh(engineGeo, engineMat);
+    engine.position.set(-1.3, 0, 0);
+    subGroup.add(engine);
+
+    cachedSubmarineModelRef.current = subGroup;
+
     // 2. Load logo7.glb (Holographic cockpit ship)
     loader.load(
       '/assets/logo7/logo7.glb',
@@ -1494,11 +1656,11 @@ export default function AsteroidCanvas({
         model.traverse((child) => {
           if (child instanceof THREE.Mesh) {
             child.geometry.center();
-            child.material = new THREE.MeshPhysicalMaterial({
-              color: 0x111111,
+                        child.material = new THREE.MeshPhysicalMaterial({
+              color: 0xffffff,
               metalness: 1.0,
               roughness: 0.1,
-              envMapIntensity: 3.0,
+              envMapIntensity: 6.0,
               clearcoat: 1.0,
               clearcoatRoughness: 0.1,
             });
@@ -1511,7 +1673,7 @@ export default function AsteroidCanvas({
         // Clone and mount inside HUD hologram
         const hudLogo = model.clone();
         hudLogo.scale.copy(model.scale).multiplyScalar(1.5);
-        hudLogo.rotation.x = Math.PI / 6;
+        hudLogo.rotation.x = 0;
         // Removed second logo at the bottom right of the screen completely per user request
         // hudGroup.add(hudLogo);
         hUDLogoMeshRef.current = hudLogo;
@@ -1723,6 +1885,7 @@ export default function AsteroidCanvas({
     // Auto start background hum lazily on load if context is ready
     return () => {
       cancelAnimationFrame(animationFrameIdRef.current);
+      if(threeRendererRef.current?.userData?.fireAnimId) cancelAnimationFrame(threeRendererRef.current.userData.fireAnimId);
       playSound.stopEngine();
     };
   }, [initializeStars]);
@@ -1737,6 +1900,7 @@ export default function AsteroidCanvas({
     comboCountRef.current = 0;
     comboTimerRef.current = 0;
     levelAsteroidsDestroyedRef.current = 0;
+    waveTriggersRef.current.clear();
     warpFactorRef.current = 1.0;
     warpGoalRef.current = 1.0;
     playSound.updateEnginePitch(1.0);
@@ -1748,6 +1912,7 @@ export default function AsteroidCanvas({
   useEffect(() => {
     if (phase === 'PLAYING') {
       levelAsteroidsDestroyedRef.current = 0;
+      waveTriggersRef.current.clear();
     } else if (phase === 'INTRO' || phase === 'GAME_OVER' || phase === 'VICTORY') {
       resetGameEntities();
     }
@@ -1826,14 +1991,22 @@ export default function AsteroidCanvas({
     if (Math.random() >= dropChance) return;
 
     // Pick type
-    let type: 'SHIELD' | 'ENERGY' | 'SCRAP' = 'SCRAP';
+    let type: 'SHIELD' | 'ENERGY' | 'SCRAP' | 'WEAPON_GAUSS' | 'WEAPON_PHASER' | 'WEAPON_NUKE' = 'SCRAP';
+    
+    const randomDraw = Math.random();
+    
     if (ast.type === AsteroidType.GOLDEN) {
-      type = Math.random() > 0.4 ? 'SCRAP' : 'ENERGY';
+      if (randomDraw > 0.9) type = 'WEAPON_NUKE';
+      else if (randomDraw > 0.7) type = 'WEAPON_GAUSS';
+      else if (randomDraw > 0.5) type = 'WEAPON_PHASER';
+      else type = Math.random() > 0.4 ? 'SCRAP' : 'ENERGY';
     } else if (ast.type === AsteroidType.DRONE) {
-      type = 'SHIELD';
+      if (randomDraw > 0.9) type = 'WEAPON_PHASER';
+      else type = 'SHIELD';
     } else {
-      const rand = Math.random();
-      type = rand > 0.65 ? 'SHIELD' : rand > 0.35 ? 'ENERGY' : 'SCRAP';
+      if (randomDraw > 0.98) type = 'WEAPON_GAUSS';
+      else if (randomDraw > 0.95) type = 'WEAPON_PHASER';
+      else type = randomDraw > 0.65 ? 'SHIELD' : randomDraw > 0.35 ? 'ENERGY' : 'SCRAP';
     }
 
     pickupsRef.current.push({
@@ -1868,7 +2041,7 @@ export default function AsteroidCanvas({
     const target3D_X = thetaX * targetZ;
     const target3D_Y = thetaY * targetZ;
 
-    setScreenShake(prev => Math.min(25, prev + 6));
+    screenShakeRef.current = Math.min(25, screenShakeRef.current + 6);
 
     const mounts = [
       { x: -140, y: 110, z: 20, color: '#ec4899' }, // Magenta neon rocket
@@ -1898,7 +2071,7 @@ export default function AsteroidCanvas({
         type: WeaponID.PLASMA_LASER,
       });
     });
-  }, [dimensions, setScreenShake, setStats]);
+  }, [dimensions, setStats]);
 
   // Custom function to create vector projectiles directed in 3D outer space
   const fireActiveWeapon = useCallback((activeWep: WeaponID, mouseX: number, mouseY: number) => {
@@ -1919,7 +2092,8 @@ export default function AsteroidCanvas({
     }
 
     // Spend energy
-    setEnergy(prev => Math.max(0, prev - config.energyCost));
+    currentEnergyRef.current = Math.max(0, currentEnergyRef.current - config.energyCost);
+    setEnergy(currentEnergyRef.current);
     lastFiredTimeRef.current = now;
 
     // Track total weapons fired
@@ -1967,7 +2141,7 @@ export default function AsteroidCanvas({
     const target3D_Y = thetaY * targetZ;
 
     // Add screenshake feedback
-    setScreenShake(prev => Math.min(20, prev + (config.id === WeaponID.PROTON_TORPEDO ? 12 : 3)));
+    screenShakeRef.current = Math.min(20, screenShakeRef.current + (config.id === WeaponID.PROTON_TORPEDO ? 12 : 3));
 
     const activeDamage = config.damage * perks.damageMultiplier;
     const triggerDouble = Math.random() < perks.doubleShotChance;
@@ -2148,7 +2322,17 @@ export default function AsteroidCanvas({
         });
       }
     }
-  }, [dimensions, setEnergy, setScore, setAsteroidsBlasted, setStats, setScreenShake, spawnExplosion, perks, handleAsteroidDrop]);
+  }, [dimensions, setEnergy, setScore, setAsteroidsBlasted, setStats, spawnExplosion, perks, handleAsteroidDrop]);
+
+  // Handle THREE.js resize updates
+  useEffect(() => {
+    if (threeCameraRef.current && threeRendererRef.current) {
+      const camera = threeCameraRef.current as THREE.PerspectiveCamera;
+      camera.aspect = dimensions.width / dimensions.height;
+      camera.updateProjectionMatrix();
+      threeRendererRef.current.setSize(dimensions.width, dimensions.height);
+    }
+  }, [dimensions]);
 
   // Main Loop Implementation (60fps)
   useEffect(() => {
@@ -2184,17 +2368,17 @@ export default function AsteroidCanvas({
             playStartTimeRef.current = Date.now();
         }
         
-        if (novaSequenceRef.current === 0 && Date.now() - playStartTimeRef.current > 17000) {
+        if (currLvl === 1 && novaSequenceRef.current === 0 && Date.now() - playStartTimeRef.current > 17000) {
             novaSequenceRef.current = Date.now();
             
             spawnExplosion(0, 0, 4000, '#ffbf00', 5000, true);
-            setScreenShake(s => Math.min(150, s + 150));
+            screenShakeRef.current = Math.min(150, screenShakeRef.current + 150);
             playSound.shieldHit(); // substitute for loud crash
             
             if (hUDLogoMeshRef.current && threeSceneRef.current) {
                 hUDLogoMeshRef.current.position.set(0, 0, -6000);
                 hUDLogoMeshRef.current.scale.copy(cachedLogoModelRef.current!.scale).multiplyScalar(300);
-                hUDLogoMeshRef.current.rotation.set(0, 0, Math.PI); 
+                hUDLogoMeshRef.current.rotation.set(0, 0, 0); 
                 threeSceneRef.current.add(hUDLogoMeshRef.current);
             }
         }
@@ -2207,9 +2391,9 @@ export default function AsteroidCanvas({
             
             if (hUDLogoMeshRef.current) {
                hUDLogoMeshRef.current.position.z = -6000 + (easeOutCubic * 1300);
-               hUDLogoMeshRef.current.rotation.y = easeOutCubic * Math.PI * 2;
-               hUDLogoMeshRef.current.rotation.x = easeOutCubic * Math.PI * 0.15;
-               hUDLogoMeshRef.current.rotation.z = Math.PI;
+               hUDLogoMeshRef.current.rotation.y = easeOutCubic * Math.PI * 2 + (progress >= 1.0 ? (timeSince - duration) * 0.0005 : 0);
+               hUDLogoMeshRef.current.rotation.x = 0;
+               hUDLogoMeshRef.current.rotation.z = 0;
                
                if (progress < 1.0 && Math.random() > 0.6) {
                    spawnExplosion(
@@ -2296,9 +2480,9 @@ export default function AsteroidCanvas({
         camera.position.y = pitch * 0.45;
         camera.rotation.z = -roll;
         
-        if (screenShake > 0.1) {
-          camera.position.x += (Math.random() - 0.5) * screenShake * 0.25;
-          camera.position.y += (Math.random() - 0.5) * screenShake * 0.25;
+        if (screenShakeRef.current > 0.1) {
+          camera.position.x += (Math.random() - 0.5) * screenShakeRef.current * 0.25;
+          camera.position.y += (Math.random() - 0.5) * screenShakeRef.current * 0.25;
         }
       }
 
@@ -2326,19 +2510,30 @@ export default function AsteroidCanvas({
       ctx.rotate(roll);
       ctx.translate(-screenCenterX, -screenCenterY);
 
-      if (screenShake > 0.1) {
-        const shakeX = (Math.random() - 0.5) * screenShake;
-        const shakeY = (Math.random() - 0.5) * screenShake;
+      if (screenShakeRef.current > 0.1) {
+        const shakeX = (Math.random() - 0.5) * screenShakeRef.current;
+        const shakeY = (Math.random() - 0.5) * screenShakeRef.current;
         ctx.translate(shakeX, shakeY);
-        // Decrease shake exponential decayed rate
-        setScreenShake(prev => Math.max(0, prev * 0.88));
+        
+        const rootElements = document.querySelectorAll('.game-shaker');
+        rootElements.forEach(el => {
+           (el as HTMLElement).style.transform = `translate(${shakeX}px, ${shakeY}px)`;
+        });
+        
+        screenShakeRef.current *= 0.88;
+      } else if (screenShakeRef.current > 0) {
+        const rootElements = document.querySelectorAll('.game-shaker');
+        rootElements.forEach(el => {
+           (el as HTMLElement).style.transform = 'none';
+        });
+        screenShakeRef.current = 0;
       }
 
       // 3. Process Warp Acceleration factor dynamics
       if (p === 'WARPING') {
         warpGoalRef.current = 24.0;
         // Ship vibrates intensely during hyperspace charge
-        setScreenShake(s => Math.max(s, 4));
+        screenShakeRef.current = Math.max(screenShakeRef.current, 4);
       } else {
         warpGoalRef.current = 1.0;
       }
@@ -2401,47 +2596,108 @@ export default function AsteroidCanvas({
         }
 
         const activeAsteroidCount = asteroidsRef.current.filter(a => a.health > 0 && a.type !== AsteroidType.DEBRIS).length;
-        if (activeAsteroidCount < 15 && timeNow - lastSpawnTimeRef.current > (lvlConfig.spawnInterval * spawnMultiplier) * 0.3) {
-          const spawnCount = Math.min(3, 15 - activeAsteroidCount);
+        
+        // Wave-based structured combat instead of randomized streaming
+        const timeSinceLastSpawn = timeNow - lastSpawnTimeRef.current;
+        const shouldSpawnNextWave = activeAsteroidCount === 0 || timeSinceLastSpawn > (lvlConfig.spawnInterval * spawnMultiplier * 4);
+
+        const currentSystemObj = systems.find(s => s.id === activeSystemId) || systems[0];
+        const currentQuota = currentSystemObj.quota;
+
+        if (shouldSpawnNextWave && levelAsteroidsDestroyedRef.current < currentQuota) {
+          // Increment internal wave counter
+          const waveNum = Math.floor(levelAsteroidsDestroyedRef.current / Math.max(1, currentQuota / 5)) + 1;
+          
+          let formation = 'SCATTER';
+          let spawnCount = 3 + Math.floor(Math.random() * 3);
+          
+          // Organized progression of wave formations
+          if (currLvl >= 1) {
+             const wavePatternRoll = Math.random();
+             if (wavePatternRoll > 0.85) formation = 'V_FORMATION';
+             else if (wavePatternRoll > 0.70 && currLvl > 1) formation = 'WALL';
+             else if (wavePatternRoll > 0.55 && currLvl > 2) formation = 'TWIN_FLANK';
+             else if (wavePatternRoll > 0.40 && currLvl > 3) formation = 'RING';
+             else formation = 'SCATTER';
+          }
+
+          if (formation === 'V_FORMATION') spawnCount = 3;
+          if (formation === 'WALL') spawnCount = 5;
+          if (formation === 'TWIN_FLANK') spawnCount = 4;
+          if (formation === 'RING') spawnCount = 6;
+          
           for (let s = 0; s < spawnCount; s++) {
-            // Distance from center
-            const spawnRadius = 250 + Math.random() * 800; // Even wider dispersal
-            const spawnAngle = Math.random() * Math.PI * 2;
-            const isTargetedToWindshield = Math.random() > 0.65;
-
-            const baseX = isTargetedToWindshield ? (Math.random() - 0.5) * 300 : Math.cos(spawnAngle) * spawnRadius;
-            const baseY = isTargetedToWindshield ? (Math.random() - 0.5) * 500 : Math.sin(spawnAngle) * spawnRadius * 1.5;
-            const baseZ = 6000 + Math.random() * 2000;
-
-            // Distribute sub-species types
+            let baseX = 0;
+            let baseY = 0;
+            let baseZ = 6000 + Math.random() * 800;
             let astType = AsteroidType.NORMAL;
-            if (currentActiveSectorIdRef.current === SystemID.BETELGEUSE) {
-              astType = AsteroidType.ICE; // Removed ENEMY_SHIP per user request
+            let isDrone = false;
+
+            // Orchestrated Structure coordinates
+            if (formation === 'V_FORMATION') {
+              isDrone = true;
+              astType = AsteroidType.ENEMY_SHIP;
+              if (s === 0) { baseX = 0; baseY = 200; baseZ = 6000; }
+              if (s === 1) { baseX = -400; baseY = 0; baseZ = 6500; }
+              if (s === 2) { baseX = 400; baseY = 0; baseZ = 6500; }
+            } else if (formation === 'WALL') {
+              baseX = -800 + (s * 400);
+              baseY = (Math.random() - 0.5) * 100;
+              baseZ = 6500;
+              if (s % 2 === 0) astType = AsteroidType.RADIOACTIVE;
+            } else if (formation === 'TWIN_FLANK') {
+              astType = AsteroidType.ICE;
+              baseX = s % 2 === 0 ? -900 : 900;
+              baseY = (s < 2) ? 200 : -200;
+              baseZ = 6000 + (s < 2 ? 0 : 400);
+            } else if (formation === 'RING') {
+              const angle = (s / spawnCount) * Math.PI * 2;
+              baseX = Math.cos(angle) * 700;
+              baseY = Math.sin(angle) * 700;
+              baseZ = 6200;
+              astType = AsteroidType.NORMAL;
+              if (s === 0) astType = AsteroidType.GOLDEN;
             } else {
-              const randType = Math.random();
-              if (currLvl >= 2 && randType < 0.12) {
-                astType = AsteroidType.GOLDEN; // Was drone before, removed per user request
-              } else if (randType < 0.22) {
-                astType = AsteroidType.RADIOACTIVE;
-              } else if (randType < 0.35) {
-                astType = AsteroidType.GOLDEN;
-              } else if (randType < 0.45) {
-                astType = AsteroidType.ICE;
-              } else if (randType < 0.49) {
-                astType = AsteroidType.NOVA;
-              } else if (randType < 0.53) {
-                astType = AsteroidType.TIME_WARP;
+              // 'SCATTER' standard
+              const spawnRadius = 250 + Math.random() * 900; 
+              const spawnAngle = Math.random() * Math.PI * 2;
+              baseX = Math.cos(spawnAngle) * spawnRadius;
+              baseY = Math.sin(spawnAngle) * spawnRadius * 1.5;
+
+              // Distribute localized sub-species types intelligently
+              if (currentActiveSectorIdRef.current === SystemID.BETELGEUSE) {
+                astType = AsteroidType.ICE; 
+              } else if (currentActiveSectorIdRef.current === SystemID.GLIESE_WATERWORLD) {
+                const randType = Math.random();
+                if (randType < 0.3) astType = AsteroidType.ALIEN_SUBMARINE;
+                else if (randType < 0.6) astType = AsteroidType.ICE; // Water/Ice
+                else if (randType < 0.7 && currLvl > 1) astType = AsteroidType.NOVA;
+                else astType = AsteroidType.NORMAL;
+              } else {
+                const randType = Math.random();
+                if (currLvl >= 3 && randType < 0.1) astType = AsteroidType.ENEMY_SHIP;
+                else if (randType < 0.22) astType = AsteroidType.RADIOACTIVE;
+                else if (randType < 0.35) astType = AsteroidType.GOLDEN;
+                else if (randType < 0.45) astType = AsteroidType.ICE;
+                else if (randType < 0.49 && currLvl > 1) astType = AsteroidType.NOVA;
+                else if (randType < 0.53 && currLvl > 2) astType = AsteroidType.TIME_WARP;
               }
+              if (astType === AsteroidType.ENEMY_SHIP || astType === AsteroidType.ALIEN_SUBMARINE) isDrone = true;
             }
 
-            const isDrone = false;
             const isSpecialAbility = astType === AsteroidType.NOVA || astType === AsteroidType.TIME_WARP;
-            const astRadius = isDrone ? 20 : isSpecialAbility ? 45 : 10 + Math.random() * 80; // huge diverse sizes
-            const hpBonus = astType === AsteroidType.ICE ? 1.7 : isDrone ? 1.3 : isSpecialAbility ? 2.5 : 1.0;
+            const astRadius = isDrone ? 35 : isSpecialAbility ? 45 : 15 + Math.random() * 70; 
+            const hpBonus = astType === AsteroidType.ICE ? 1.7 : isDrone ? 1.5 : isSpecialAbility ? 2.5 : 1.0;
             const hpFactor = (astRadius > 45 ? 2.2 : 1.0) * hpBonus;
-            const speedFact = astType === AsteroidType.GOLDEN ? 1.4 : isDrone ? 0.6 : isSpecialAbility ? 0.8 : 1.0;
+            
+            // Speed logic
+            let speedFact = astType === AsteroidType.GOLDEN ? 1.4 : isDrone ? 0.9 : isSpecialAbility ? 0.8 : 1.0;
+            if (formation === 'TWIN_FLANK') speedFact = 1.8;
+            if (formation === 'V_FORMATION') speedFact = 1.5;
+            if (formation === 'RING') speedFact = 1.1;
+
             const baseSpd = lvlConfig.asteroidSpeedMin + Math.random() * (lvlConfig.asteroidSpeedMax - lvlConfig.asteroidSpeedMin);
-            const sizeRatio = (astRadius - 10) / 80;
+            const sizeRatio = Math.max(0, (astRadius - 10) / 80);
             const physicsSpeedModifier = 1.35 - sizeRatio * 0.7;
             const asteroidSpeed = baseSpd * speedFact * physicsSpeedModifier * speedMultiplier;
 
@@ -2449,59 +2705,64 @@ export default function AsteroidCanvas({
               id: Math.random().toString(),
               x: baseX,
               y: baseY,
-              z: 6000 + Math.random() * 2000,
+              z: baseZ,
               radius: astRadius,
               size: astRadius,
               maxHealth: Math.max(10, Math.floor(lvlConfig.asteroidMaxHealth * hpFactor * hpMultiplier)),
               health: Math.max(10, Math.floor(lvlConfig.asteroidMaxHealth * hpFactor * hpMultiplier)),
               speed: asteroidSpeed,
               rotationAngle: Math.random() * Math.PI,
-              rotationSpeed: isDrone ? 0.01 : (Math.random() - 0.5) * 0.08,
-              rotSpeedX: isDrone ? 0.006 : (Math.random() - 0.5) * 0.06,
-              rotSpeedY: isDrone ? 0.014 : (Math.random() - 0.5) * 0.06,
-              rotSpeedZ: isDrone ? 0.008 : (Math.random() - 0.5) * 0.06,
-              shapeScaleX: 0.7 + Math.random() * 0.6,
-              shapeScaleY: 0.7 + Math.random() * 0.6,
-              shapeScaleZ: 0.7 + Math.random() * 0.6,
+              rotationSpeed: isDrone ? 0.0 : (Math.random() - 0.5) * 0.08,
+              rotSpeedX: isDrone ? 0.0 : (Math.random() - 0.5) * 0.06,
+              rotSpeedY: isDrone ? 0.0 : (Math.random() - 0.5) * 0.06,
+              rotSpeedZ: isDrone ? 0.01 : (Math.random() - 0.5) * 0.06,
+              shapeScaleX: isDrone ? 1.0 : 0.7 + Math.random() * 0.6,
+              shapeScaleY: isDrone ? 0.4 : 0.7 + Math.random() * 0.6,
+              shapeScaleZ: isDrone ? 1.2 : 0.7 + Math.random() * 0.6,
               craterSeeds: Array.from({ length: 8 }, () => Math.random()),
               hitFlashTime: 0,
               type: astType,
-              droneFireCooldown: isDrone ? 90 + Math.random() * 120 : undefined,
+              droneFireCooldown: isDrone ? 40 + Math.random() * 40 : undefined,
+              flightPattern: formation,
+              flightOffset: s,
             });
 
-            // Spawn smaller pebble debris around it to consistently fill screen
-            const debrisCount = 3 + Math.floor(Math.random() * 4);
-            for(let d=0; d<debrisCount; d++) {
-                const dRadius = 1 + Math.random() * 6; // tiny debris
-                asteroidsRef.current.push({
-                  id: Math.random().toString(),
-                  x: baseX + (Math.random() - 0.5) * 200,
-                  y: baseY + (Math.random() - 0.5) * 200,
-                  z: baseZ + (Math.random() - 0.5) * 200,
-                  radius: dRadius,
-                  size: dRadius,
-                  maxHealth: 5,
-                  health: 5,
-                  speed: asteroidSpeed * (0.8 + Math.random() * 0.4), // random variance around parent speed
-                  rotationAngle: Math.random() * Math.PI,
-                  rotationSpeed: (Math.random() - 0.5) * 0.2, // fast tumbling
-                  rotSpeedX: (Math.random() - 0.5) * 0.15,
-                  rotSpeedY: (Math.random() - 0.5) * 0.15,
-                  rotSpeedZ: (Math.random() - 0.5) * 0.15,
-                  shapeScaleX: 0.5 + Math.random() * 1.0,
-                  shapeScaleY: 0.5 + Math.random() * 1.0,
-                  shapeScaleZ: 0.5 + Math.random() * 1.0,
-                  craterSeeds: Array.from({ length: 8 }, () => Math.random()),
-                  hitFlashTime: 0,
-                  type: AsteroidType.DEBRIS,
-                });
+            // Spawn smaller pebble debris around standard asteroids (keep clean for formations)
+            if (!isDrone && formation === 'SCATTER' && Math.random() > 0.5) {
+              const debrisCount = 1 + Math.floor(Math.random() * 2);
+              for(let d=0; d<debrisCount; d++) {
+                  const dRadius = 1 + Math.random() * 4;
+                  asteroidsRef.current.push({
+                    id: Math.random().toString(),
+                    x: baseX + (Math.random() - 0.5) * 150,
+                    y: baseY + (Math.random() - 0.5) * 150,
+                    z: baseZ + (Math.random() - 0.5) * 150,
+                    radius: dRadius,
+                    size: dRadius,
+                    maxHealth: 5,
+                    health: 5,
+                    speed: asteroidSpeed * (0.8 + Math.random() * 0.4),
+                    rotationAngle: Math.random() * Math.PI,
+                    rotationSpeed: (Math.random() - 0.5) * 0.2,
+                    rotSpeedX: (Math.random() - 0.5) * 0.15,
+                    rotSpeedY: (Math.random() - 0.5) * 0.15,
+                    rotSpeedZ: (Math.random() - 0.5) * 0.15,
+                    shapeScaleX: 0.5 + Math.random() * 1.0,
+                    shapeScaleY: 0.5 + Math.random() * 1.0,
+                    shapeScaleZ: 0.5 + Math.random() * 1.0,
+                    craterSeeds: Array.from({ length: 4 }, () => Math.random()),
+                    hitFlashTime: 0,
+                    type: AsteroidType.DEBRIS,
+                  });
+              }
             }
           }
           lastSpawnTimeRef.current = timeNow;
         }
 
         // Auto transition into Hyperspace Warp when the target count of level is blasted
-        if (levelAsteroidsDestroyedRef.current >= lvlConfig.targetCount) {
+        const finalObj = systems.find(s => s.id === activeSystemId) || systems[0];
+        if (levelAsteroidsDestroyedRef.current >= finalObj.quota) {
           setPhase('WARPING');
           playSound.warp();
           
@@ -2538,17 +2799,20 @@ export default function AsteroidCanvas({
           proj.y += pitch * 0.45;
 
           if (proj.z <= 25) {
-            // direct impact on cockpit windshield shields!
-            playSound.shieldHit();
-            shieldRippleRef.current = 1.0;
-            setShield(prev => Math.max(0, prev - 15));
-            setScreenShake(s => Math.min(25, s + 12));
-            spawnExplosion(proj.x, proj.y, 25, '#ef4444', 16, false);
-            
-            if (currentShieldRef.current - 15 <= 0) {
-              setPhase('GAME_OVER');
+            // Only take damage if the projectile actually intersects the cockpit bounds
+            if (Math.abs(proj.x) < 350 && Math.abs(proj.y) < 250) {
+              playSound.shieldHit();
+              shieldRippleRef.current = 1.0;
+              currentShieldRef.current = Math.max(0, currentShieldRef.current - 15);
+              setShield(currentShieldRef.current);
+              screenShakeRef.current = Math.min(25, screenShakeRef.current + 12);
+              spawnExplosion(proj.x, proj.y, 25, '#ef4444', 16, false);
+              
+              if (currentShieldRef.current <= 0) {
+                setPhase('GAME_OVER');
+              }
             }
-            return; // expires
+            return; // expires whether it hits or misses past the camera
           }
 
           // Render hostile plasma beam
@@ -2706,24 +2970,27 @@ export default function AsteroidCanvas({
             ast.hitFlashTime = 4; // Trigger white visual damage flash
 
             // Increment dynamic pilot accuracy trackers
-            setStats(s => ({
-              ...s,
-              shotsHit: s.shotsHit + 1,
-            }));
+            // Accumulate hits silently - throttle React updates
+            (currentEnergyRef as any).pendingShotsHit = ((currentEnergyRef as any).pendingShotsHit || 0) + 1;
+            if ((currentEnergyRef as any).pendingShotsHit > 5) {
+               setStats(s => ({ ...s, shotsHit: s.shotsHit + (currentEnergyRef as any).pendingShotsHit }));
+               (currentEnergyRef as any).pendingShotsHit = 0;
+            }
 
-            if (proj.type === WeaponID.PROTON_TORPEDO) {
+            if (proj.type === WeaponID.PROTON_TORPEDO || proj.type === WeaponID.NUKE) {
               // Torpedo trigger massive secondary shockwave explosion!
-              spawnExplosion(ast.x, ast.y, ast.z, "#ff5e00", 35, true);
-              setScreenShake(s => Math.min(25, s + 18));
+              const isNuke = proj.type === WeaponID.NUKE;
+              spawnExplosion(ast.x, ast.y, ast.z, isNuke ? "#FCD34D" : "#ff5e00", isNuke ? 100 : 35, true);
+              screenShakeRef.current = Math.min(isNuke ? 60 : 25, screenShakeRef.current + (isNuke ? 40 : 18));
 
               // Splash damage to nearby asteroids residing in 3D sphere!
-              const splashRadiusSq = Math.pow(250, 2);
+              const splashRadiusSq = Math.pow(isNuke ? 600 : 250, 2);
               asteroidsRef.current.forEach((other) => {
                 if (other.health <= 0 || other.id === ast.id) return;
                 const distToOtherSq = Math.pow(ast.x - other.x, 2) + Math.pow(ast.y - other.y, 2) + Math.pow(ast.z - other.z, 2);
                 if (distToOtherSq < splashRadiusSq) {
                   const distToOther = Math.sqrt(distToOtherSq);
-                  const proportionalDmg = Math.floor(proj.damage * (1 - distToOther / 250));
+                  const proportionalDmg = Math.floor(proj.damage * (1 - distToOther / (isNuke ? 600 : 250)));
                   other.health -= proportionalDmg;
                   other.hitFlashTime = 6;
                 }
@@ -2788,7 +3055,7 @@ export default function AsteroidCanvas({
               if (ast.type === AsteroidType.NOVA) {
                 playSound.explosion(true);
                 spawnExplosion(ast.x, ast.y, ast.z, "#ef4444", 120, true);
-                setScreenShake(s => Math.min(45, s + 30));
+                screenShakeRef.current = Math.min(45, screenShakeRef.current + 30);
                 
                 asteroidsRef.current.forEach(other => {
                   if (other.id !== ast.id) {
@@ -2810,7 +3077,7 @@ export default function AsteroidCanvas({
                 });
               } else {
                 spawnExplosion(ast.x, ast.y, ast.z, "#a1a1aa", ast.radius > 45 ? 60 : 35, true);
-                setScreenShake(s => Math.min(30, s + (ast.radius > 45 ? 15 : 8)));
+                screenShakeRef.current = Math.min(30, screenShakeRef.current + (ast.radius > 45 ? 15 : 8));
               }
 
               handleAsteroidDrop(ast);
@@ -2831,13 +3098,6 @@ export default function AsteroidCanvas({
       const newActiveAsteroids = [];
       const newPickups = [];
 
-      // Update Projectiles physically
-      projectilesRef.current.forEach(proj => {
-        proj.z -= proj.vz || 60; // fly forward
-        proj.x += proj.vx || 0;
-        proj.y += proj.vy || 0;
-      });
-
       const shipForwardSpeed = 35.0; // Fast base speed
 
       // Update Asteroids physically
@@ -2850,21 +3110,97 @@ export default function AsteroidCanvas({
         if (ast.vx) ast.x += ast.vx;
         if (ast.vy) ast.y += ast.vy;
 
+        // Enemy and Asteroid flight patterns (Organized Maneuvers)
+        if (ast.flightPattern) {
+          const timeNow = Date.now();
+          const offset = ast.flightOffset || 0;
+          if (ast.flightPattern === 'V_FORMATION') {
+            // Sway slightly left and right as a unit
+            ast.x += Math.sin(timeNow * 0.001) * 3.0;
+            // Maintain V spacing
+            const targetX = offset === 0 ? 0 : offset === 1 ? -400 : 400;
+            ast.x += (targetX - ast.x) * 0.01;
+          } else if (ast.flightPattern === 'WALL') {
+            // Move back and forth in a sweeping wall
+            ast.x += Math.sin(timeNow * 0.0005) * 4.0;
+          } else if (ast.flightPattern === 'TWIN_FLANK') {
+            // Spiral inwards
+            ast.x += Math.sin(timeNow * 0.002 + offset * Math.PI) * 6.0;
+            ast.y += Math.cos(timeNow * 0.002 + offset * Math.PI) * 6.0;
+          }
+        }
+
+        // Enemy intelligence and maneuvering
+        if (ast.type === AsteroidType.ENEMY_SHIP || ast.type === AsteroidType.ALIEN_SUBMARINE || ast.type === AsteroidType.DRONE) {
+          const timeNow = Date.now();
+          // If no formal pattern, use evasive maneuvers
+          if (!ast.flightPattern || ast.flightPattern === 'SCATTER') {
+            const patternOffset = ast.id.charCodeAt(0) % 3;
+            if (patternOffset === 0) {
+              ast.x += Math.sin(timeNow * 0.0015 + ast.id.charCodeAt(2)) * 7.5;
+            } else if (patternOffset === 1) {
+              ast.y += Math.cos(timeNow * 0.0018 + ast.id.charCodeAt(1)) * 6.0;
+            } else {
+              ast.x += Math.sin(timeNow * 0.003) * 4.5;
+              ast.y += Math.cos(timeNow * 0.003) * 4.5;
+            }
+          }
+
+          // Homing logic towards center of screen (player cockpit) - pulls them into the fight
+          // Only home if not deeply locked in a formation, or home very weakly
+          if (ast.z > 300 && ast.z < 4000) {
+             const homingStrength = (ast.flightPattern === 'V_FORMATION' || ast.flightPattern === 'WALL') ? 0.0005 : ((ast.type === AsteroidType.ENEMY_SHIP || ast.type === AsteroidType.ALIEN_SUBMARINE) ? 0.0035 : 0.0015);
+             ast.x += (0 - ast.x) * homingStrength;
+             ast.y += (0 - ast.y) * homingStrength;
+          }
+
+          // Return fire at player
+          if (ast.droneFireCooldown !== undefined && ast.z > 200 && ast.z < 3500) {
+            ast.droneFireCooldown -= 1;
+            if (ast.droneFireCooldown <= 0) {
+              playSound.laser(WeaponID.PLASMA_LASER);
+              // Fire spray pattern: Heavy ships fire multi-laser bursts
+              const isHeavy = (ast.type === AsteroidType.ENEMY_SHIP || ast.type === AsteroidType.ALIEN_SUBMARINE);
+              const shots = isHeavy ? 3 : 1;
+              for(let v = 0; v < shots; v++) {
+                 projectilesRef.current.push({
+                   x: ast.x + (isHeavy ? (v - 1) * 35 : 0), 
+                   y: ast.y, z: ast.z - 30, 
+                   vx: (-ast.x * 0.006) + (isHeavy ? (v - 1) * 3.5 : 0), // Pre-calculated structured fan attack pattern
+                   vy: (-ast.y * 0.006) + (isHeavy ? Math.sin(timeNow * 0.005 + v) * 2.0 : 0),
+                   vz: -45, // Move quickly towards player
+                   color: '#ef4444', size: isHeavy ? 12 : 8, speed: 45, life: 100, isEnemy: true
+                 });
+              }
+              ast.droneFireCooldown = isHeavy ? 90 + Math.random() * 40 : 80 + Math.random() * 50;
+            }
+          }
+        }
+
+        // Return generic asteroid rotation logic (since removed previously during scale updates)
+        ast.rotationAngle += ast.rotationSpeed;
+
         // Player takes hit if asteroid breaks windshield
         if (ast.z <= 25) {
-          playSound.shieldHit();
-          shieldRippleRef.current = 1.0;
-          const hitDamage = Math.floor(ast.radius * (ast.type === AsteroidType.RADIOACTIVE ? 0.75 : 0.45));
-          setShield(prev => Math.max(0, prev - hitDamage));
-          
-          const crashColor = ast.type === AsteroidType.RADIOACTIVE ? '#10B981' : ast.type === AsteroidType.ICE ? '#00EBFF' : '#FF4500';
-          spawnExplosion(ast.x, ast.y, 25, crashColor, 32, true);
-          setScreenShake(30);
+          // If the asteroid is within the physical bounds of the ship's front profile, it hits
+          if (Math.abs(ast.x) < 300 + ast.radius && Math.abs(ast.y) < 200 + ast.radius) {
+            playSound.shieldHit();
+            shieldRippleRef.current = 1.0;
+            let hitDamage = Math.floor(ast.radius * (ast.type === AsteroidType.RADIOACTIVE ? 0.75 : 0.45));
+            if ((ast.type === AsteroidType.ENEMY_SHIP || ast.type === AsteroidType.ALIEN_SUBMARINE)) hitDamage *= 2.5; // Heavy collision damage
+            
+            currentShieldRef.current = Math.max(0, currentShieldRef.current - hitDamage);
+            setShield(currentShieldRef.current);
+            
+            const crashColor = ast.type === AsteroidType.RADIOACTIVE ? '#10B981' : ast.type === AsteroidType.ICE ? '#00EBFF' : (ast.type === AsteroidType.ENEMY_SHIP || ast.type === AsteroidType.ALIEN_SUBMARINE) ? '#ef4444' : '#FF4500';
+            spawnExplosion(ast.x, ast.y, 25, crashColor, 32, true);
+            screenShakeRef.current = 30;
 
-          if (currentShieldRef.current - hitDamage <= 0) {
-            setPhase('GAME_OVER');
-            currentPhaseRef.current = 'GAME_OVER';
-            return;
+            if (currentShieldRef.current <= 0) {
+              setPhase('GAME_OVER');
+              currentPhaseRef.current = 'GAME_OVER';
+              return;
+            }
           }
           ast.health = 0; // destroyed
         }
@@ -3027,12 +3363,20 @@ export default function AsteroidCanvas({
         // Check collection completed
         if (pk.harvestProgress >= 1.0) {
           playSound.upgrade(); // quick reward confirmation
-          spawnExplosion(pk.x, pk.y, pk.z, pk.type === 'SHIELD' ? '#06B6D4' : pk.type === 'ENERGY' ? '#A855F7' : '#F5C31E', 15, false);
+          spawnExplosion(pk.x, pk.y, pk.z, pk.type === 'SHIELD' ? '#F59E0B' : pk.type === 'ENERGY' ? '#A855F7' : pk.type.startsWith('WEAPON') ? '#FCD34D' : '#F5C31E', 15, false);
 
           if (pk.type === 'SHIELD') {
-            setShield(prev => Math.min(perks.maxShield, prev + 25));
+            currentShieldRef.current = Math.min(perks.maxShield, currentShieldRef.current + 25);
+            setShield(currentShieldRef.current);
           } else if (pk.type === 'ENERGY') {
-            setEnergy(prev => Math.min(perks.maxEnergy, prev + 35));
+            currentEnergyRef.current = Math.min(perks.maxEnergy, currentEnergyRef.current + 35);
+            setEnergy(currentEnergyRef.current);
+          } else if (pk.type === 'WEAPON_GAUSS') {
+            setPerks(prev => ({ ...prev, unlockedGauss: true }));
+          } else if (pk.type === 'WEAPON_PHASER') {
+            setPerks(prev => ({ ...prev, unlockedPhaser: true }));
+          } else if (pk.type === 'WEAPON_NUKE') {
+            setPerks(prev => ({ ...prev, unlockedNuke: true }));
           } else if (pk.type === 'SCRAP') {
             setScore(prev => prev + 1500);
           }
@@ -3065,13 +3409,25 @@ export default function AsteroidCanvas({
           let ringStyle = 'rgba(245, 195, 30, 0.4)';
           let iconText = 'SCRAP';
           if (pk.type === 'SHIELD') {
-            capStyle = '#06B6D4'; // cyan shield
-            ringStyle = 'rgba(6, 182, 212, 0.4)';
+            capStyle = '#F59E0B'; // cyan shield
+            ringStyle = 'rgba(245, 158, 11, 0.4)';
             iconText = 'SHLD';
           } else if (pk.type === 'ENERGY') {
             capStyle = '#A855F7'; // purple energy core
             ringStyle = 'rgba(168, 85, 247, 0.4)';
             iconText = 'ENRG';
+          } else if (pk.type === 'WEAPON_GAUSS') {
+            capStyle = '#0EA5E9'; // cyan weapon
+            ringStyle = 'rgba(14, 165, 233, 0.4)';
+            iconText = 'GAUS';
+          } else if (pk.type === 'WEAPON_PHASER') {
+            capStyle = '#F472B6'; // pink weapon
+            ringStyle = 'rgba(244, 114, 182, 0.4)';
+            iconText = 'PHSR';
+          } else if (pk.type === 'WEAPON_NUKE') {
+            capStyle = '#FCD34D'; // Yellow high-alert weapon
+            ringStyle = 'rgba(252, 211, 77, 0.4)';
+            iconText = 'NUKE';
           }
 
           // Outer glowing radar circle
@@ -3196,7 +3552,7 @@ export default function AsteroidCanvas({
 
       // 8.6 Draw Special Asteroid HUD Frames
       asteroidsRef.current.forEach((ast) => {
-        if (ast.z < 60 || ast.type === AsteroidType.NORMAL || ast.type === AsteroidType.DEBRIS || ast.type === AsteroidType.ENEMY_SHIP || ast.type === AsteroidType.DRONE) return;
+        if (ast.z < 60 || ast.type === AsteroidType.NORMAL || ast.type === AsteroidType.DEBRIS || ast.type === AsteroidType.ENEMY_SHIP || ast.type === AsteroidType.ALIEN_SUBMARINE || ast.type === AsteroidType.DRONE) return;
         
         const astScreenX = screenCenterX + (ast.x / ast.z) * FOV;
         const astScreenY = screenCenterY + (ast.y / ast.z) * FOV;
@@ -3211,50 +3567,23 @@ export default function AsteroidCanvas({
         if (ast.type === AsteroidType.TIME_WARP) { powerColor = '#8b5cf6'; label = 'TEMPORAL'; }
 
         ctx.save();
-        ctx.strokeStyle = powerColor;
         ctx.fillStyle = powerColor;
-        ctx.lineWidth = 1.0;
+        ctx.strokeStyle = powerColor;
         ctx.globalAlpha = Math.max(0.2, 1.0 - (ast.z / 6000));
+        ctx.font = '600 8px monospace';
+        ctx.textAlign = 'center';
 
-        // HUD style frame (bracket outside the asteroid radius)
-        const frameSize = Math.max(12, astProjRadius * 1.5);
+        const textOffset = Math.max(12, astProjRadius * 1.5) + 8;
+        ctx.fillText(`[ ${label} ]`, astScreenX, astScreenY + textOffset);
+
+        // Very small subtle triangle pointing down at the asteroid
         ctx.beginPath();
-        // Top Left corner bracket
-        ctx.moveTo(astScreenX - frameSize, astScreenY - frameSize + 6);
-        ctx.lineTo(astScreenX - frameSize, astScreenY - frameSize);
-        ctx.lineTo(astScreenX - frameSize + 6, astScreenY - frameSize);
-
-        // Top Right bracket
-        ctx.moveTo(astScreenX + frameSize, astScreenY - frameSize + 6);
-        ctx.lineTo(astScreenX + frameSize, astScreenY - frameSize);
-        ctx.lineTo(astScreenX + frameSize - 6, astScreenY - frameSize);
-
-        // Bottom Left bracket
-        ctx.moveTo(astScreenX - frameSize, astScreenY + frameSize - 6);
-        ctx.lineTo(astScreenX - frameSize, astScreenY + frameSize);
-        ctx.lineTo(astScreenX - frameSize + 6, astScreenY + frameSize);
-
-        // Bottom Right bracket
-        ctx.moveTo(astScreenX + frameSize, astScreenY + frameSize - 6);
-        ctx.lineTo(astScreenX + frameSize, astScreenY + frameSize);
-        ctx.lineTo(astScreenX + frameSize - 6, astScreenY + frameSize);
-        ctx.stroke();
-
-        // Line pointing to it
-        ctx.beginPath();
-        ctx.moveTo(astScreenX + frameSize, astScreenY);
-        ctx.lineTo(astScreenX + frameSize + 15, astScreenY - 15);
-        ctx.lineTo(astScreenX + frameSize + 40, astScreenY - 15);
-        ctx.stroke();
-
-        // small circle color of special power
-        ctx.beginPath();
-        ctx.arc(astScreenX + frameSize + 46, astScreenY - 15, 3, 0, Math.PI * 2);
+        ctx.moveTo(astScreenX, astScreenY - textOffset + 4);
+        ctx.lineTo(astScreenX - 3, astScreenY - textOffset);
+        ctx.lineTo(astScreenX + 3, astScreenY - textOffset);
+        ctx.closePath();
         ctx.fill();
 
-        ctx.font = '600 8px monospace';
-        ctx.fillStyle = `rgba(255, 255, 255, 0.8)`;
-        ctx.fillText(label, astScreenX + frameSize + 15, astScreenY - 20);
         ctx.restore();
       });
 
@@ -3275,39 +3604,24 @@ export default function AsteroidCanvas({
           );
 
           if (distanceToCursor <= astProjRadius + 20) {
-            // Render green Target Lock bounding bracket
+            // Render clean circular target lock
             foundLock = true;
+            ctx.save();
             ctx.strokeStyle = 'rgba(52, 199, 89, 0.8)';
-            ctx.lineWidth = 1.5;
+            ctx.fillStyle = 'rgba(52, 199, 89, 0.9)';
+            ctx.lineWidth = 1.0;
             const bSize = Math.max(15, astProjRadius * 1.35);
 
             ctx.beginPath();
-            // Top Left corner bracket
-            ctx.moveTo(astScreenX - bSize, astScreenY - bSize + 8);
-            ctx.lineTo(astScreenX - bSize, astScreenY - bSize);
-            ctx.lineTo(astScreenX - bSize + 8, astScreenY - bSize);
-
-            // Top Right bracket
-            ctx.moveTo(astScreenX + bSize, astScreenY - bSize + 8);
-            ctx.lineTo(astScreenX + bSize, astScreenY - bSize);
-            ctx.lineTo(astScreenX + bSize - 8, astScreenY - bSize);
-
-            // Bottom Left bracket
-            ctx.moveTo(astScreenX - bSize, astScreenY + bSize - 8);
-            ctx.lineTo(astScreenX - bSize, astScreenY + bSize);
-            ctx.lineTo(astScreenX - bSize + 8, astScreenY + bSize);
-
-            // Bottom Right bracket
-            ctx.moveTo(astScreenX + bSize, astScreenY + bSize - 8);
-            ctx.lineTo(astScreenX + bSize, astScreenY + bSize);
-            ctx.lineTo(astScreenX + bSize - 8, astScreenY + bSize);
+            ctx.arc(astScreenX, astScreenY, bSize, 0, Math.PI * 2);
+            ctx.setLineDash([4, 4]);
             ctx.stroke();
 
-            // Lock warning label text
-            ctx.fillStyle = 'rgba(52, 199, 89, 0.9)';
+            // Dist label text
             ctx.font = '700 9px monospace';
-            ctx.fillText('TRGT ACQD', astScreenX + bSize + 6, astScreenY - 4);
-            ctx.fillText(`DIST: ${Math.floor(ast.z)}M`, astScreenX + bSize + 6, astScreenY + 6);
+            ctx.textAlign = 'center';
+            ctx.fillText(`LOCKED • ${Math.floor(ast.z)}M`, astScreenX, astScreenY - bSize - 8);
+            ctx.restore();
           }
         });
       }
@@ -3628,7 +3942,13 @@ export default function AsteroidCanvas({
       // 10. Automatically slowly regenerate Energy reserves
       if (p === 'PLAYING') {
         const rechargeRate = 0.42 * perks.energyRegenRate; // energy recharge per frame
-        setEnergy((prev) => Math.min(perks.maxEnergy, prev + rechargeRate));
+        currentEnergyRef.current = Math.min(perks.maxEnergy, currentEnergyRef.current + rechargeRate);
+        
+        // OPTIMIZATION: Throttle energy React state updates
+        if (Date.now() - (currentEnergyRef as any).lastSyncTime > 150 || !(currentEnergyRef as any).lastSyncTime) {
+           setEnergy(currentEnergyRef.current);
+           (currentEnergyRef as any).lastSyncTime = Date.now();
+        }
       }
 
       // --- THREEJS ENTITIES SYNCHRONIZATION AND RENDERING ---
@@ -3700,11 +4020,14 @@ export default function AsteroidCanvas({
         }
 
         // 3. Synchronize Asteroids using high performance Object Pooling and Material Caching
-        const currentAsteroidIds = new Set(asteroidsRef.current.map(a => a.id));
+        _tempAstIds.clear();
+        for (let i = 0; i < asteroidsRef.current.length; i++) {
+           _tempAstIds.add(asteroidsRef.current[i].id);
+        }
         
         // Return dead asteroid meshes back to their specific subspecies pools and hide them
         threeAsteroidsMapRef.current.forEach((mesh, id) => {
-          if (!currentAsteroidIds.has(id)) {
+          if (!_tempAstIds.has(id)) {
             scene.remove(mesh);
             mesh.visible = false;
             
@@ -3731,6 +4054,8 @@ export default function AsteroidCanvas({
               // Construct a new mesh only when the pool is completely exhausted
               if (ast.type === AsteroidType.ENEMY_SHIP && cachedEnemyShipModelRef.current) {
                 mesh = cachedEnemyShipModelRef.current.clone();
+              } else if (ast.type === AsteroidType.ALIEN_SUBMARINE && cachedSubmarineModelRef.current) {
+                mesh = cachedSubmarineModelRef.current.clone();
               } else if (cachedAsteroidModelRef.current) {
                 mesh = cachedAsteroidModelRef.current.clone();
                 // Deform geometry before applying material to avoid scale stretching
@@ -3739,22 +4064,21 @@ export default function AsteroidCanvas({
                     child.geometry = child.geometry.clone();
                     const pos = child.geometry.attributes.position;
                     if (pos) {
-                      const v = new THREE.Vector3();
                       for (let i = 0; i < pos.count; i++) {
-                        v.fromBufferAttribute(pos, i);
-                        const n = 1.0 + (Math.sin(v.x * 3.0 + ast.craterSeeds[0]*10) * Math.cos(v.y * 3.0 + ast.craterSeeds[1]*10) * Math.sin(v.z * 3.0 + ast.craterSeeds[2]*10)) * 0.3;
-                        v.x *= (ast.shapeScaleX ?? 1.0) * n;
-                        v.y *= (ast.shapeScaleY ?? 1.0) * n;
-                        v.z *= (ast.shapeScaleZ ?? 1.0) * n;
-                        pos.setXYZ(i, v.x, v.y, v.z);
+                        _tempVec3.fromBufferAttribute(pos, i);
+                        const n = 1.0 + (Math.sin(_tempVec3.x * 3.0 + ast.craterSeeds[0]*10) * Math.cos(_tempVec3.y * 3.0 + ast.craterSeeds[1]*10) * Math.sin(_tempVec3.z * 3.0 + ast.craterSeeds[2]*10)) * 0.3;
+                        _tempVec3.x *= (ast.shapeScaleX ?? 1.0) * n;
+                        _tempVec3.y *= (ast.shapeScaleY ?? 1.0) * n;
+                        _tempVec3.z *= (ast.shapeScaleZ ?? 1.0) * n;
+                        pos.setXYZ(i, _tempVec3.x, _tempVec3.y, _tempVec3.z);
                       }
                       child.geometry.computeVertexNormals();
                       const uv = child.geometry.attributes.uv;
                       if (uv) {
                         for (let i = 0; i < pos.count; i++) {
-                           v.fromBufferAttribute(pos, i).normalize();
-                           const u = 0.5 + Math.atan2(v.z, v.x) / (2 * Math.PI);
-                           const vCoord = 0.5 - Math.asin(Math.max(-1, Math.min(1, v.y))) / Math.PI;
+                           _tempVec3.fromBufferAttribute(pos, i).normalize();
+                           const u = 0.5 + Math.atan2(_tempVec3.z, _tempVec3.x) / (2 * Math.PI);
+                           const vCoord = 0.5 - Math.asin(Math.max(-1, Math.min(1, _tempVec3.y))) / Math.PI;
                            uv.setXY(i, u, vCoord);
                         }
                         uv.needsUpdate = true;
@@ -3775,7 +4099,7 @@ export default function AsteroidCanvas({
               mesh.traverse((child) => {
                 if (child instanceof THREE.Mesh) {
                   let customizedMat: THREE.Material | null = null;
-                  if (ast.type === AsteroidType.ENEMY_SHIP) {
+                  if (ast.type === AsteroidType.ENEMY_SHIP || ast.type === AsteroidType.ALIEN_SUBMARINE) {
                     customizedMat = null;
                   } else if (ast.type === AsteroidType.DRONE) {
                     customizedMat = droneMaterialRef.current!;
@@ -3805,7 +4129,7 @@ export default function AsteroidCanvas({
           const scaleX = ast.radius * (ast.shapeScaleX ?? 1.0) * fisheyeMultiplier;
           const scaleY = ast.radius * (ast.shapeScaleY ?? 1.0) * fisheyeMultiplier;
           const scaleZ = ast.radius * (ast.shapeScaleZ ?? 1.0) * fisheyeMultiplier;
-          if (ast.type === AsteroidType.ENEMY_SHIP) {
+          if (ast.type === AsteroidType.ENEMY_SHIP || ast.type === AsteroidType.ALIEN_SUBMARINE) {
             mesh.scale.set(scaleX, scaleY, scaleZ);
           } else {
             // we already baked shapeScale into geometry for non-enemy rocks!
@@ -3818,7 +4142,7 @@ export default function AsteroidCanvas({
           const rotSpeedZ = ast.rotSpeedZ ?? 0.015;
           const ageTicks = (Date.now() * 0.04);
 
-          if (ast.type === AsteroidType.ENEMY_SHIP) {
+          if (ast.type === AsteroidType.ENEMY_SHIP || ast.type === AsteroidType.ALIEN_SUBMARINE) {
             mesh.rotation.set(0, Math.PI, 0); // Face camera
           } else {
             mesh.rotation.set(
@@ -3870,18 +4194,19 @@ export default function AsteroidCanvas({
         });
 
         // 4. Synchronize Projectiles
-        const currentProjectileIds = new Set(projectilesRef.current.map(p => p.id));
+        _tempProjIds.clear();
+        for (let i = 0; i < projectilesRef.current.length; i++) {
+           _tempProjIds.add(projectilesRef.current[i].id);
+        }
         
         threeProjectilesMapRef.current.forEach((mesh, id) => {
-          if (!currentProjectileIds.has(id)) {
+          if (!_tempProjIds.has(id)) {
             scene.remove(mesh);
-            mesh.traverse(child => {
-              if (child instanceof THREE.Mesh) {
-                child.geometry.dispose();
-                if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
-                else child.material.dispose();
-              }
-            });
+            mesh.visible = false;
+            const projType = (mesh as any).projectileType as WeaponID || WeaponID.PLASMA_LASER;
+            let pool = projectileMeshPoolRef.current.get(projType);
+            if (!pool) { pool = []; projectileMeshPoolRef.current.set(projType, pool); }
+            pool.push(mesh);
             threeProjectilesMapRef.current.delete(id);
           }
         });
@@ -3889,30 +4214,37 @@ export default function AsteroidCanvas({
         projectilesRef.current.forEach((proj) => {
           let mesh = threeProjectilesMapRef.current.get(proj.id);
           if (!mesh) {
-            const length = proj.type === WeaponID.PROTON_TORPEDO ? 16 : 30;
-            const radius = proj.type === WeaponID.PROTON_TORPEDO ? 3.5 : 0.85;
-            
-            const group = new THREE.Group();
-            const geom = new THREE.CylinderGeometry(radius, radius, length, 8);
-            geom.rotateX(Math.PI / 2);
-            
-            const projColor = new THREE.Color(proj.color);
-            const mat = new THREE.MeshBasicMaterial({
-              color: projColor,
-              transparent: true,
-              opacity: 0.95,
-              blending: THREE.AdditiveBlending,
-            });
-            
-            const cylinder = new THREE.Mesh(geom, mat);
-            group.add(cylinder);
+            let pool = projectileMeshPoolRef.current.get(proj.type as WeaponID);
+            if (pool && pool.length > 0) {
+              mesh = pool.pop()!;
+              mesh.visible = true;
+            } else {
+              const length = proj.type === WeaponID.PROTON_TORPEDO ? 16 : 30;
+              const radius = proj.type === WeaponID.PROTON_TORPEDO ? 3.5 : 0.85;
 
-            // Travelling pointlight to illuminate asteriods dynamically!
-            const travelLight = new THREE.PointLight(projColor, 3.5, 150);
-            travelLight.name = `ProjectileLight_${proj.id}`;
-            group.add(travelLight);
+              const group = new THREE.Group();
+              const geom = new THREE.CylinderGeometry(radius, radius, length, 8);
+              geom.rotateX(Math.PI / 2);
 
-            mesh = group;
+              const projColor = new THREE.Color(proj.color);
+              const mat = new THREE.MeshBasicMaterial({
+                color: projColor,
+                transparent: true,
+                opacity: 0.95,
+                blending: THREE.AdditiveBlending,
+              });
+
+              const cylinder = new THREE.Mesh(geom, mat);
+              group.add(cylinder);
+
+              // Travelling pointlight to illuminate asteriods dynamically!
+              const travelLight = new THREE.PointLight(projColor, 3.5, 150);
+              travelLight.name = `ProjectileLight_${proj.id}`;
+              group.add(travelLight);
+
+              mesh = group;
+              (mesh as any).projectileType = proj.type;
+            }
             mesh.name = `Projectile_${proj.type}_${proj.id}`;
             scene.add(mesh);
             threeProjectilesMapRef.current.set(proj.id, mesh);
@@ -3922,18 +4254,19 @@ export default function AsteroidCanvas({
         });
 
         // 5. Synchronize Pickups
-        const currentPickupIds = new Set(pickupsRef.current.map(p => p.id));
+        _tempPickupIds.clear();
+        for (let i = 0; i < pickupsRef.current.length; i++) {
+           _tempPickupIds.add(pickupsRef.current[i].id);
+        }
         
         threePickupsMapRef.current.forEach((mesh, id) => {
-          if (!currentPickupIds.has(id)) {
+          if (!_tempPickupIds.has(id)) {
             scene.remove(mesh);
-            mesh.traverse(child => {
-              if (child instanceof THREE.Mesh) {
-                child.geometry.dispose();
-                if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
-                else child.material.dispose();
-              }
-            });
+            mesh.visible = false;
+            const pkType = (mesh as any).pickupType as string || 'SCRAP';
+            let pool = pickupMeshPoolRef.current.get(pkType);
+            if (!pool) { pool = []; pickupMeshPoolRef.current.set(pkType, pool); }
+            pool.push(mesh);
             threePickupsMapRef.current.delete(id);
           }
         });
@@ -3941,40 +4274,47 @@ export default function AsteroidCanvas({
         pickupsRef.current.forEach((pk) => {
           let mesh = threePickupsMapRef.current.get(pk.id);
           if (!mesh) {
-            const group = new THREE.Group();
-            let geom: THREE.BufferGeometry;
-            let themeColor: number;
-            
-            if (pk.type === 'SHIELD') {
-              geom = new THREE.OctahedronGeometry(8, 0);
-              themeColor = 0x3b82f6;
-            } else if (pk.type === 'ENERGY') {
-              geom = new THREE.DodecahedronGeometry(8, 0);
-              themeColor = 0xeab308;
+            let pool = pickupMeshPoolRef.current.get(pk.type);
+            if (pool && pool.length > 0) {
+              mesh = pool.pop()!;
+              mesh.visible = true;
             } else {
-              geom = new THREE.IcosahedronGeometry(7, 0);
-              themeColor = 0xa855f7;
+              const group = new THREE.Group();
+              let geom: THREE.BufferGeometry;
+              let themeColor: number;
+              
+              if (pk.type === 'SHIELD') {
+                geom = new THREE.OctahedronGeometry(8, 0);
+                themeColor = 0x3b82f6;
+              } else if (pk.type === 'ENERGY') {
+                geom = new THREE.DodecahedronGeometry(8, 0);
+                themeColor = 0xeab308;
+              } else {
+                geom = new THREE.IcosahedronGeometry(7, 0);
+                themeColor = 0xa855f7;
+              }
+              
+              const mat = new THREE.MeshStandardMaterial({
+                color: themeColor,
+                emissive: themeColor,
+                emissiveIntensity: 0.85,
+                metalness: 0.85,
+                roughness: 0.15,
+              });
+              
+              const crystal = new THREE.Mesh(geom, mat);
+              group.add(crystal);
+
+              const ringGeo = new THREE.TorusGeometry(12, 0.4, 6, 24);
+              const ringMat = new THREE.MeshBasicMaterial({ color: themeColor, transparent: true, opacity: 0.45 });
+              const ringY = new THREE.Mesh(ringGeo, ringMat);
+              ringY.name = `PickupRing_${pk.id}`;
+              ringY.rotation.x = Math.PI / 2;
+              group.add(ringY);
+
+              mesh = group;
+              (mesh as any).pickupType = pk.type;
             }
-            
-            const mat = new THREE.MeshStandardMaterial({
-              color: themeColor,
-              emissive: themeColor,
-              emissiveIntensity: 0.85,
-              metalness: 0.85,
-              roughness: 0.15,
-            });
-            
-            const crystal = new THREE.Mesh(geom, mat);
-            group.add(crystal);
-
-            const ringGeo = new THREE.TorusGeometry(12, 0.4, 6, 24);
-            const ringMat = new THREE.MeshBasicMaterial({ color: themeColor, transparent: true, opacity: 0.45 });
-            const ringY = new THREE.Mesh(ringGeo, ringMat);
-            ringY.name = `PickupRing_${pk.id}`;
-            ringY.rotation.x = Math.PI / 2;
-            group.add(ringY);
-
-            mesh = group;
             mesh.name = `Pickup_${pk.type}_${pk.id}`;
             scene.add(mesh);
             threePickupsMapRef.current.set(pk.id, mesh);
@@ -3999,10 +4339,10 @@ export default function AsteroidCanvas({
             positions[idx3 + 2] = -p.z - 2000;
 
             const lifeRatio = Math.max(0, 1.0 - p.life / p.maxLife);
-            const threeColor = new THREE.Color(p.color);
-            colors[idx3] = threeColor.r * lifeRatio;
-            colors[idx3 + 1] = threeColor.g * lifeRatio;
-            colors[idx3 + 2] = threeColor.b * lifeRatio;
+            _tempColor.set(p.color);
+            colors[idx3] = _tempColor.r * lifeRatio;
+            colors[idx3 + 1] = _tempColor.g * lifeRatio;
+            colors[idx3 + 2] = _tempColor.b * lifeRatio;
             idx3 += 3;
           });
 
@@ -4026,8 +4366,9 @@ export default function AsteroidCanvas({
 
     return () => {
       cancelAnimationFrame(localFrameId);
+      if(threeRendererRef.current?.userData?.fireAnimId) cancelAnimationFrame(threeRendererRef.current.userData.fireAnimId);
     };
-  }, [dimensions, activeWeapon, isPaused, fireActiveWeapon, fireOverdriveSeekers, setEnergy, setShield, setPhase, setLevel, screenShake, setScreenShake, perks, touchControlMode, isTouchDevice, overdriveActive, setOverdriveActive, overdriveCharge, setOverdriveCharge]);
+  }, [dimensions, activeWeapon, isPaused, fireActiveWeapon, fireOverdriveSeekers, setEnergy, setShield, setPhase, setLevel, perks, touchControlMode, isTouchDevice, overdriveActive, setOverdriveActive, overdriveCharge, setOverdriveCharge]);
 
   return (
     <div
@@ -4060,4 +4401,19 @@ export default function AsteroidCanvas({
       />
     </div>
   );
-}
+};
+
+export default React.memo(AsteroidCanvas, (prev, next) => {
+  return prev.activeWeapon === next.activeWeapon &&
+    prev.phase === next.phase &&
+    prev.level === next.level &&
+    prev.isPaused === next.isPaused &&
+    prev.screenShake === next.screenShake &&
+    prev.perks === next.perks &&
+    prev.touchControlMode === next.touchControlMode &&
+    prev.isTouchDevice === next.isTouchDevice &&
+    prev.overdriveActive === next.overdriveActive &&
+    prev.difficulty === next.difficulty &&
+    prev.activeSystemId === next.activeSystemId &&
+    prev.systems === next.systems;
+});

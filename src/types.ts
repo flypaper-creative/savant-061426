@@ -3,6 +3,9 @@ export enum WeaponID {
   PROTON_TORPEDO = 'PROTON_TORPEDO',
   ION_BEAM = 'ION_BEAM',
   FLAK_CANNON = 'FLAK_CANNON',
+  GAUSS_CANNON = 'GAUSS_CANNON',
+  PHASER = 'PHASER',
+  NUKE = 'NUKE'
 }
 
 export enum AsteroidType {
@@ -15,6 +18,7 @@ export enum AsteroidType {
   DEBRIS = 'DEBRIS',
   NOVA = 'NOVA',               // Triggers a massive smart-bomb clearing nearby rocks
   TIME_WARP = 'TIME_WARP',     // Slows down all rocks for a few seconds (bullet time)
+  ALIEN_SUBMARINE = 'ALIEN_SUBMARINE', // Alien submarines in water world
 }
 
 export interface WeaponConfig {
@@ -51,6 +55,8 @@ export interface Asteroid {
   hitFlashTime: number; // frames a hit flash lasts
   type: AsteroidType;
   droneFireCooldown?: number; // specialized for enemy fighter drones
+  flightPattern?: string;
+  flightOffset?: number;
 }
 
 export interface Pickup3D {
@@ -61,7 +67,7 @@ export interface Pickup3D {
   vx: number;
   vy: number;
   vz: number;
-  type: 'SHIELD' | 'ENERGY' | 'SCRAP';
+  type: 'SHIELD' | 'ENERGY' | 'SCRAP' | 'WEAPON_GAUSS' | 'WEAPON_PHASER' | 'WEAPON_NUKE';
   size: number;
   brightness: number;
   harvestProgress: number; // 0 to 1 as crosshair is held over it
@@ -73,6 +79,9 @@ export interface PilotPerks {
   energyRegenRate: number;
   damageMultiplier: number;
   doubleShotChance: number;
+  unlockedGauss: boolean;
+  unlockedPhaser: boolean;
+  unlockedNuke: boolean;
 }
 
 export interface Projectile {
@@ -145,6 +154,7 @@ export enum SystemID {
   KEPLER_186F = 'KEPLER_186F',
   ORION_NEBULA = 'ORION_NEBULA',
   TRAPPIST_1 = 'TRAPPIST_1',
+  GLIESE_WATERWORLD = 'GLIESE_WATERWORLD',
 }
 
 export interface StarSystem {

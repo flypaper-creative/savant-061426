@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { WeaponID, GamePhase, PilotStats, PilotPerks, DifficultyLevel, SystemID, StarSystem, ThemeType } from './types';
 import AsteroidCanvas from './components/AsteroidCanvas';
 import CockpitOverlay from './components/CockpitOverlay';
@@ -10,11 +10,16 @@ const DEFAULT_PERKS: PilotPerks = {
   energyRegenRate: 1.0,
   damageMultiplier: 1.0,
   doubleShotChance: 0.0,
+  unlockedGauss: false,
+  unlockedPhaser: false,
+  unlockedNuke: false,
 };
+
+import Header from './components/Header';
 
 export default function App() {
   // Shared reactive game parameters
-  const [theme, setTheme] = useState<ThemeType>('ARCADE');
+  const [theme, setTheme] = useState<ThemeType>('MINIMAL_TECH');
   const [activeWeapon, setActiveWeapon] = useState<WeaponID>(WeaponID.PLASMA_LASER);
   const [shield, setShield] = useState<number>(INITIAL_SHIELD);
   const [energy, setEnergy] = useState<number>(INITIAL_ENERGY);
@@ -23,8 +28,7 @@ export default function App() {
   const [score, setScore] = useState<number>(0);
   const [asteroidsBlasted, setAsteroidsBlasted] = useState<number>(0);
   const [isPaused, setIsPaused] = useState<boolean>(false);
-  const [screenShake, setScreenShake] = useState<number>(0);
-
+  
   const [perks, setPerks] = useState<PilotPerks>(DEFAULT_PERKS);
 
   const [overdriveCharge, setOverdriveCharge] = useState<number>(0);
@@ -135,6 +139,20 @@ export default function App() {
       nebulaColors: ['#3730a3', '#312e81', '#1e1b4b'],
       musicBPM: 165,
     },
+    {
+      id: SystemID.GLIESE_WATERWORLD,
+      name: 'GLIESE 1214 B',
+      codename: 'ABYSSAL OCEANS',
+      description: 'Murky sub-surface oceans. Navigation is plagued by deep water currents and hostile alien submarines.',
+      hazardLevel: 'CRUSHING DEPTHS',
+      dangerIndex: 5,
+      completed: false,
+      quota: 45,
+      progress: 0,
+      accentColor: '#00ffcc',
+      nebulaColors: ['#001122', '#002222', '#000011'],
+      musicBPM: 120,
+    },
   ]);
 
   const [stats, setStats] = useState<PilotStats>({
@@ -157,10 +175,11 @@ export default function App() {
   const shieldRatio = shield / (perks.maxShield || 100);
 
   return (
-    <main className={`relative w-screen h-screen bg-black overflow-hidden flex items-center justify-center select-none ${themeFontClasses[theme]}`}>
+    <main className={`relative w-screen h-screen bg-[#020205] overflow-hidden flex items-center justify-center select-none ${themeFontClasses[theme]}`}>
+      <Header />
       {/* Immersive CRT subtle overlay lines to boost sci-fi console aesthetic */}
-      <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_at_center,_transparent_70%,_rgba(0,0,0,0.4)_100%)] z-20" />
-      <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(18,24,38,0)_50%,_rgba(0,0,0,0.18)_50%)] bg-[length:100%_4px] z-20" />
+      <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_at_center,_transparent_50%,_rgba(2,2,5,0.7)_100%)] z-20" />
+      <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(255,255,255,0)_50%,_rgba(255,255,255,0.02)_50%)] bg-[length:100%_2px] opacity-30 z-20" />
 
       {/* 3D High-Frequency Space Renderer */}
       <AsteroidCanvas
@@ -180,9 +199,7 @@ export default function App() {
         stats={stats}
         setStats={setStats}
         isPaused={isPaused}
-        screenShake={screenShake}
-        setScreenShake={setScreenShake}
-        perks={perks}
+                perks={perks}
         setPerks={setPerks}
         touchControlMode={touchControlMode}
         setTouchControlMode={setTouchControlMode}
@@ -222,9 +239,7 @@ export default function App() {
         setStats={setStats}
         isPaused={isPaused}
         setIsPaused={setIsPaused}
-        screenShake={screenShake}
-        setScreenShake={setScreenShake}
-        perks={perks}
+                perks={perks}
         setPerks={setPerks}
         touchControlMode={touchControlMode}
         setTouchControlMode={setTouchControlMode}
