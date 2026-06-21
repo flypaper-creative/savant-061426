@@ -1,28 +1,6 @@
 import { WeaponID, WeaponConfig } from './types';
 
 export const WEAPON_CONFIGS: Record<WeaponID, WeaponConfig> = {
-  [WeaponID.PLASMA_LASER]: {
-    id: WeaponID.PLASMA_LASER,
-    name: 'PLASMA',
-    description: 'High velocity dual plasma bolts. Reliable and low energy consumption.',
-    damage: 20,
-    fireRate: 200, // min cooldown in ms
-    energyCost: 3,
-    color: '#D4AF37', // Gold
-    projectileSpeed: 30, // speed in Z units per frame
-    soundFrequency: 800,
-  },
-  [WeaponID.PROTON_TORPEDO]: {
-    id: WeaponID.PROTON_TORPEDO,
-    name: 'TORPEDO',
-    description: 'Slow-moving thermonuclear payload that triggers high splash damage.',
-    damage: 100,
-    fireRate: 800,
-    energyCost: 20,
-    color: '#E11D48', // Crimson Rose
-    projectileSpeed: 14,
-    soundFrequency: 200,
-  },
   [WeaponID.ION_BEAM]: {
     id: WeaponID.ION_BEAM,
     name: 'BEAM',
@@ -45,16 +23,27 @@ export const WEAPON_CONFIGS: Record<WeaponID, WeaponConfig> = {
     projectileSpeed: 24,
     soundFrequency: 500,
   },
-  [WeaponID.GAUSS_CANNON]: {
-    id: WeaponID.GAUSS_CANNON,
-    name: 'GAUSS',
-    description: 'Electromagnetic railgun firing slugs at relativistic speeds.',
-    damage: 180,
-    fireRate: 1500,
-    energyCost: 35,
-    color: '#0EA5E9',
-    projectileSpeed: 80,
-    soundFrequency: 150,
+  [WeaponID.PLASMA_LASER]: {
+    id: WeaponID.PLASMA_LASER,
+    name: 'PLASMA',
+    description: 'High velocity dual plasma bolts. Reliable and low energy consumption.',
+    damage: 20,
+    fireRate: 200, // min cooldown in ms
+    energyCost: 3,
+    color: '#D4AF37', // Gold
+    projectileSpeed: 30, // speed in Z units per frame
+    soundFrequency: 800,
+  },
+  [WeaponID.TESLA_CHAIN]: {
+    id: WeaponID.TESLA_CHAIN,
+    name: 'TESLA',
+    description: 'Electrical arc that chains across multiple conductive debris fields.',
+    damage: 25,
+    fireRate: 300,
+    energyCost: 5,
+    color: '#60A5FA', // Blue
+    projectileSpeed: 45,
+    soundFrequency: 1000,
   },
   [WeaponID.PHASER]: {
     id: WeaponID.PHASER,
@@ -67,6 +56,83 @@ export const WEAPON_CONFIGS: Record<WeaponID, WeaponConfig> = {
     projectileSpeed: 35,
     soundFrequency: 900,
   },
+  [WeaponID.PULSAR_BURST]: {
+    id: WeaponID.PULSAR_BURST,
+    name: 'PULSAR',
+    description: 'Fires rapid bursts of concentrated neutron star material.',
+    damage: 60,
+    fireRate: 600,
+    energyCost: 15,
+    color: '#FDE047', // Yellow
+    projectileSpeed: 32,
+    soundFrequency: 600,
+  },
+  [WeaponID.PROTON_TORPEDO]: {
+    id: WeaponID.PROTON_TORPEDO,
+    name: 'TORPEDO',
+    description: 'Slow-moving thermonuclear payload that triggers high splash damage.',
+    damage: 100,
+    fireRate: 800,
+    energyCost: 20,
+    color: '#E11D48', // Crimson Rose
+    projectileSpeed: 14,
+    soundFrequency: 200,
+  },
+  [WeaponID.GRAVITON_PULSE]: {
+    id: WeaponID.GRAVITON_PULSE,
+    name: 'GRAVITON',
+    description: 'High pressure graviton sphere. Rips apart structural limits.',
+    damage: 120,
+    fireRate: 1000,
+    energyCost: 25,
+    color: '#4ADE80', // Green
+    projectileSpeed: 20,
+    soundFrequency: 300,
+  },
+  [WeaponID.GAUSS_CANNON]: {
+    id: WeaponID.GAUSS_CANNON,
+    name: 'GAUSS',
+    description: 'Electromagnetic railgun firing slugs at relativistic speeds.',
+    damage: 180,
+    fireRate: 1500,
+    energyCost: 35,
+    color: '#0EA5E9',
+    projectileSpeed: 80,
+    soundFrequency: 150,
+  },
+  [WeaponID.TACHYON_LANCE]: {
+    id: WeaponID.TACHYON_LANCE,
+    name: 'TACHYON',
+    description: 'A beam moving faster than light. Instantly incinerates targets.',
+    damage: 250,
+    fireRate: 2000,
+    energyCost: 45,
+    color: '#2DD4BF', // Teal
+    projectileSpeed: 999, // instant
+    soundFrequency: 450,
+  },
+  [WeaponID.VOID_RAY]: {
+    id: WeaponID.VOID_RAY,
+    name: 'VOID',
+    description: 'Harnesses dark matter to disintegrate massive targets cleanly.',
+    damage: 400,
+    fireRate: 2500,
+    energyCost: 55,
+    color: '#818CF8', // Indigo
+    projectileSpeed: 50,
+    soundFrequency: 120,
+  },
+  [WeaponID.ANTIMATTER_BEAM]: {
+    id: WeaponID.ANTIMATTER_BEAM,
+    name: 'ANTIMATTER',
+    description: 'Channels raw antimatter plasma. Vaporizes immediately.',
+    damage: 800,
+    fireRate: 3500,
+    energyCost: 70,
+    color: '#FB7185', // Rose
+    projectileSpeed: 60,
+    soundFrequency: 100,
+  },
   [WeaponID.NUKE]: {
     id: WeaponID.NUKE,
     name: 'NUKE',
@@ -77,6 +143,17 @@ export const WEAPON_CONFIGS: Record<WeaponID, WeaponConfig> = {
     color: '#FCD34D',
     projectileSpeed: 10,
     soundFrequency: 80,
+  },
+  [WeaponID.SINGULARITY_CANNON]: {
+    id: WeaponID.SINGULARITY_CANNON,
+    name: 'SINGULARITY',
+    description: 'Miniature black hole payload. Ultimate destructive force.',
+    damage: 5000,
+    fireRate: 6000,
+    energyCost: 100,
+    color: '#000000', // Black
+    projectileSpeed: 8,
+    soundFrequency: 40,
   },
 };
 

@@ -1,0 +1,24 @@
+23:  Shockwave,
+591:    // Shockwave concentric expansion rings
+1192:  const shockwavesRef = useRef<Shockwave[]>([]);
+1219:  const waveTriggersRef = useRef<Set<number>>(new Set());
+1309:        activeColor = 0xec4899; // Vaporwave Cyber Pink
+2296:    waveTriggersRef.current.clear();
+2308:      waveTriggersRef.current.clear();
+2330:      if (shockwavesRef.current.length < 15) {
+2331:        shockwavesRef.current.push({
+2455:        { x: 0, y: 150, z: 15, color: "#a855f7" }, // Royal purple wave rocket
+3210:          // Increment internal wave counter
+3211:          const waveNum = Math.min(
+3223:          // Deterministic, meticulously balanced wave configurations per sector level
+3228:          spawnCount = spawnBaseAmount + dynamicDensityFactor + waveNum;
+3238:             if (waveNum > 3) enemiesForSystem.push(AsteroidType.ENEMY_SHIP);
+3257:          if (waveNum === 1) {
+3259:          } else if (waveNum === 2) {
+3261:          } else if (waveNum === 3) {
+3263:          } else if (waveNum === 4) {
+4504:      // 8.5 Draw Cosmic Shockwaves
+4505:      const activeShockwaves: Shockwave[] = [];
+4506:      shockwavesRef.current.forEach((sw) => {
+4540:          activeShockwaves.push(sw);
+4543:      shockwavesRef.current = activeShockwaves;

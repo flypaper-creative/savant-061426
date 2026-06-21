@@ -3,6 +3,7 @@ import { WeaponID, GamePhase, PilotStats, PilotPerks, DifficultyLevel, SystemID,
 import AsteroidCanvas from './components/AsteroidCanvas';
 import CockpitOverlay from './components/CockpitOverlay';
 import { INITIAL_SHIELD, INITIAL_ENERGY } from './constants';
+import { WebsiteView } from './components/WebsiteView';
 
 const DEFAULT_PERKS: PilotPerks = {
   maxShield: 100,
@@ -52,7 +53,7 @@ export default function App() {
       quota: 12,
       progress: 0,
       accentColor: '#a855f7',
-      nebulaColors: ['#3b0764', '#1e1c4e', '#131235'],
+      nebulaColors: ['#d946ef', '#a21caf', '#701a75'],
       musicBPM: 94,
     },
     {
@@ -161,7 +162,18 @@ export default function App() {
     accuracy: 0,
     shotsFired: 0,
     shotsHit: 0,
+    playTime: 0,
   });
+
+  useEffect(() => {
+    let timer: number;
+    if (phase === 'PLAYING' && !isPaused) {
+      timer = window.setInterval(() => {
+        setStats(prev => ({ ...prev, playTime: prev.playTime + 1 }));
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [phase, isPaused, setStats]);
 
   
 
@@ -173,6 +185,14 @@ export default function App() {
   };
 
   const shieldRatio = shield / (perks.maxShield || 100);
+
+  if (phase === 'WEBSITE') {
+    return (
+      <main className={`relative w-screen h-screen bg-[#020205] overflow-auto select-none ${themeFontClasses[theme]}`}>
+        <WebsiteView setPhase={setPhase} />
+      </main>
+    );
+  }
 
   return (
     <main className={`relative w-screen h-screen bg-[#020205] overflow-hidden flex items-center justify-center select-none ${themeFontClasses[theme]}`}>

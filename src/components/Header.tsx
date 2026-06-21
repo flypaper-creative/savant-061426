@@ -5,12 +5,29 @@ import { Menu, X } from 'lucide-react';
 export default function Header() {
   const [menuOpen, setMenuOpen] = useState(false);
 
+  const renderTriangleA = (marginLeft?: string) => (
+    <svg className="mr-[0.05em]" style={{ transform: 'translateY(3px)', marginLeft: marginLeft || '0.05em', height: 'calc(0.95ex + 2px)' }} width="0.75em" viewBox="0 0 100 100" preserveAspectRatio="none" fill="none" stroke="currentColor" strokeWidth="12" strokeLinejoin="miter">
+      <polygon points="50,10 10,90 90,90" />
+    </svg>
+  );
+
+  const renderTriangleV = (marginLeft?: string) => (
+    <svg className="mr-[0.05em]" style={{ transform: 'translateY(3px)', marginLeft: marginLeft || '0.05em', height: 'calc(0.95ex + 2px)' }} width="0.75em" viewBox="0 0 100 100" preserveAspectRatio="none" fill="none" stroke="currentColor" strokeWidth="12" strokeLinejoin="miter">
+      <polygon points="10,10 90,10 50,90" />
+    </svg>
+  );
+
   return (
-    <header className="absolute top-0 left-0 w-full h-16 bg-[#050508]/80 backdrop-blur-md border-b border-white/5 z-[100] flex items-center justify-between px-8 pointer-events-auto shadow-none">
-      <div className="flex items-center gap-2">
+    <header className="absolute top-0 left-0 w-full h-16 bg-[#050508]/80 backdrop-blur-md border-b border-white/5 z-[100] flex items-center justify-between pl-2 pr-8 pointer-events-auto shadow-none">
+      <div className="flex items-center -translate-x-[60px]">
         <LogoCanvas />
-        <h1 className="text-white font-sans text-xl md:text-xl tracking-[0.25em] font-medium text-white/90">
-          savant
+        <h1 
+          className="text-white text-xl md:text-[22px] font-medium text-white/90 transition-all duration-1000 flex items-center ml-[46px] translate-y-[1px]"
+          style={{ fontFamily: `'Michroma', sans-serif` }}
+        >
+          <span className="flex items-center tracking-[0.03em]">
+            <span style={{ transform: 'translateX(1px)' }}>s</span>{renderTriangleA()}{renderTriangleV('calc(0.05em - 4px)')}{renderTriangleA('calc(0.05em - 4px)')}<span>nt</span>
+          </span>
         </h1>
       </div>
 

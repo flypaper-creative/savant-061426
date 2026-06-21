@@ -1,11 +1,18 @@
 export enum WeaponID {
-  PLASMA_LASER = 'PLASMA_LASER',
-  PROTON_TORPEDO = 'PROTON_TORPEDO',
   ION_BEAM = 'ION_BEAM',
   FLAK_CANNON = 'FLAK_CANNON',
-  GAUSS_CANNON = 'GAUSS_CANNON',
+  PLASMA_LASER = 'PLASMA_LASER',
+  TESLA_CHAIN = 'TESLA_CHAIN',
   PHASER = 'PHASER',
-  NUKE = 'NUKE'
+  PULSAR_BURST = 'PULSAR_BURST',
+  PROTON_TORPEDO = 'PROTON_TORPEDO',
+  GRAVITON_PULSE = 'GRAVITON_PULSE',
+  GAUSS_CANNON = 'GAUSS_CANNON',
+  TACHYON_LANCE = 'TACHYON_LANCE',
+  VOID_RAY = 'VOID_RAY',
+  ANTIMATTER_BEAM = 'ANTIMATTER_BEAM',
+  NUKE = 'NUKE',
+  SINGULARITY_CANNON = 'SINGULARITY_CANNON'
 }
 
 export enum AsteroidType {
@@ -19,6 +26,7 @@ export enum AsteroidType {
   NOVA = 'NOVA',               // Triggers a massive smart-bomb clearing nearby rocks
   TIME_WARP = 'TIME_WARP',     // Slows down all rocks for a few seconds (bullet time)
   ALIEN_SUBMARINE = 'ALIEN_SUBMARINE', // Alien submarines in water world
+  MAGMA = 'MAGMA',
 }
 
 export interface WeaponConfig {
@@ -138,7 +146,7 @@ export interface FloatingText {
 }
 
 export type ThemeType = 'CYBERPUNK' | 'ARCADE' | 'MINIMAL_TECH';
-export type GamePhase = 'INTRO' | 'PLAYING' | 'WARPING' | 'PERK_SELECTION' | 'GAME_OVER' | 'VICTORY';
+export type GamePhase = 'INTRO' | 'PLAYING' | 'WARPING' | 'PERK_SELECTION' | 'GAME_OVER' | 'VICTORY' | 'TRANSITIONING_TO_SITE' | 'WEBSITE';
 
 export enum DifficultyLevel {
   RECRUIT = 'RECRUIT',
@@ -189,6 +197,7 @@ export interface PilotStats {
   accuracy: number;
   shotsFired: number;
   shotsHit: number;
+  playTime: number;
 }
 
 
